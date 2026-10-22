@@ -29,7 +29,10 @@ object CarPlayNavigationCapture {
         val lastCallbackMs: Long = 0,
         val routeState: Int? = null,
         val maneuver: Int? = null,
-        val directory: String = ""
+        val directory: String = "",
+        val summary: CarPlayCaptureSummary = CarPlayCaptureSummary(),
+        val startedAtMs: Long = 0,
+        val stoppedAtMs: Long = 0
     )
 
     @Volatile var status = Status()
@@ -93,9 +96,8 @@ object CarPlayNavigationCapture {
                 if (binding == null && now >= nextBindMs) bind()
                 if (ended) return
                 view = view.copy(dropped = gate.dropped)
-                record("heartbeat", JSONObject()
-                    .put("callbacks", view.callbacks).put("errors", view.errors)
-                    .put("dropped", view.dropped).put("binderConnected", view.connected)
+                record("heartbeat", captureCounts(now)
+                    .put("binderConnected", view.connected)
                     .put("callbackAgeMs", if (view.lastCallbackMs == 0L) JSONObject.NULL else now - view.lastCallbackMs))
                 publish()
                 worker.postDelayed(this, 10_000L)
@@ -109,6 +111,7 @@ object CarPlayNavigationCapture {
                     files = CarPlayCaptureFiles(directory)
                     view = view.copy(directory = directory.absolutePath)
                     startedAtMs = SystemClock.elapsedRealtime()
+                    view = view.copy(startedAtMs = startedAtMs)
                     if (!record("capture_start", JSONObject().put("versionCode", BuildConfig.VERSION_CODE)
                         .put("versionName", BuildConfig.VERSION_NAME).put("mode", "diagnostic_only"))) return@post
                     val checks = CarPlayGuidanceParcel.selfTest()
@@ -213,7 +216,8 @@ object CarPlayNavigationCapture {
                 active.registered = subscribe(active, 7)
                 require(active.registered) { "subscription refused" }
                 failures = 0
-                view = view.copy(connected = true, message = "Assinatura enviada; aguardando orientação", routeState = null, maneuver = null)
+                view = view.copy(connected = true, message = "Serviço conectado; aguardando dados de rota", routeState = null, maneuver = null,
+                    summary = view.summary.copy(lastKind = null))
                 record("subscription_sent", JSONObject().put("generation", active.number))
                 publish()
             } catch (error: Exception) {
@@ -258,7 +262,8 @@ object CarPlayNavigationCapture {
             failures = minOf(failures + 1, 4)
             val delay = minOf(15_000L * failures, 60_000L)
             nextBindMs = SystemClock.elapsedRealtime() + delay
-            view = view.copy(connected = false, message = "Aguardando CarPlay; nova tentativa em ${delay / 1_000}s", routeState = null, maneuver = null)
+            view = view.copy(connected = false, message = "Aguardando CarPlay; nova tentativa em ${delay / 1_000}s", routeState = null, maneuver = null,
+                summary = view.summary.copy(lastKind = null))
             record(reason, JSONObject().put("retryMs", delay))
             publish()
         }
@@ -294,11 +299,18 @@ object CarPlayNavigationCapture {
                             terminate("Callback incompatível; captura interrompida")
                         } else {
                             val raw = parsed.getOrNull()
+                            val summary = view.summary.received(raw)
                             view = view.copy(callbacks = view.callbacks + 1, lastCallbackMs = receivedAt,
                                 routeState = raw?.mRouteGuidanceState, maneuver = raw?.mManeuverType,
-                                message = if (raw == null) "Callback vazio recebido" else "Orientações recebidas")
+                                summary = summary, message = when (summary.lastKind) {
+                                    CarPlayCapturePayloadKind.EMPTY -> "Callback nulo; sem orientação"
+                                    CarPlayCapturePayloadKind.INACTIVE -> "Callback sem rota elegível; não confirma navegação ativa"
+                                    CarPlayCapturePayloadKind.CANDIDATE -> "Dados de rota potencialmente úteis; validar conteúdo"
+                                    else -> "Dados recebidos; significado ainda não confirmado"
+                                })
                             record("guidance", JSONObject().put("generation", owner.number)
                                 .put("receivedElapsedMs", receivedAt).put("receivedEpochMs", epochMs)
+                                .put("payloadKind", summary.lastKind?.name)
                                 .put("raw", raw?.toCaptureJson() ?: JSONObject.NULL))
                             publish()
                         }
@@ -328,16 +340,23 @@ object CarPlayNavigationCapture {
             if (!ended) update(this, view)
         }
 
+        private fun captureCounts(now: Long): JSONObject = JSONObject()
+            .put("callbacks", view.callbacks).put("errors", view.errors).put("dropped", gate.dropped)
+            .put("emptyPayloads", view.summary.empty).put("inactivePayloads", view.summary.inactive)
+            .put("candidatePayloads", view.summary.candidates).put("unconfirmedPayloads", view.summary.unconfirmed)
+            .put("durationMs", if (startedAtMs == 0L) 0L else (now - startedAtMs).coerceAtLeast(0L))
+
         private fun terminate(message: String, writeEnd: Boolean = true) {
             if (ended) return
-            if (writeEnd) record("capture_stop", JSONObject().put("reason", message)
-                .put("callbacks", view.callbacks).put("errors", view.errors).put("dropped", gate.dropped))
+            val stoppedAtMs = SystemClock.elapsedRealtime()
+            if (writeEnd) record("capture_stop", captureCounts(stoppedAtMs).put("reason", message))
             if (ended) return
             ended = true
             gate.close()
             worker.removeCallbacks(tick)
             binding?.let { release(it) }
-            finished(this, view.copy(running = false, connected = false, message = message, dropped = gate.dropped))
+            finished(this, view.copy(running = false, connected = false, message = message, dropped = gate.dropped,
+                stoppedAtMs = stoppedAtMs))
             thread.quitSafely()
         }
     }

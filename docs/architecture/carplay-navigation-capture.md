@@ -1,4 +1,34 @@
-# CarPlay navigation capture — Impulse 74123
+# CarPlay navigation capture — Impulse 74126
+
+## 74126 diagnostic follow-up
+
+Based on private 74125 commit `0fcb11d03671eb89f3689bb55386bb1ea9963386`, retaining its
+HEV overlay crash fix and readability updates unchanged. The first real session was
+confirmed by the user as Waze: 546.715 seconds, 63 records, two identical inactive/default
+payloads, zero reported errors/drops and a manual capture_stop. Binder delivery and the
+102-check Android Parcel self-test were observed, but active route delivery was not.
+Raw private captures, routes and downloadable reports are not committed here.
+
+Capture now counts null, inactive/pending (states 0/2/3/4), candidate and unconfirmed
+payloads separately. Candidates require provisional eligible state 1/5/6 and at least
+one nonblank road/distance string or nonnegative maneuver code. This is only a diagnostic
+heuristic, not verified maneuver semantics, current route freshness or proof of map video.
+Unknown states and eligible states without content remain unconfirmed. Raw values are
+unchanged; counters cover the entire session, even across a rebind. Connection changes
+clear the latest classification, not historical counts. Guidance records add payloadKind;
+heartbeats and stop records add these counts and monotonic durationMs without removing
+existing fields. The screen freezes session duration on stop and labels received data
+conservatively instead of claiming that every non-null payload is useful guidance.
+
+Added route_start/route_end markers complement Apple Maps/Waze/incident markers. Use
+before starting/after ending the phone route; marker times reflect user actions, not
+automatically detected route transitions. No export/network endpoint, publisher, OEM
+patch, video/Surface/focus operation or automatic retry of a silent live binding is added.
+
+Next test: capture Apple Maps separately before creating the route, then compare an
+equivalent Waze session. 74125 can already collect the same raw navigation fields; 74126
+improves observability only. Installed OEM APK hashes differ from the static reference;
+this alone does not establish protocol incompatibility or explain inactive payloads.
 
 ## Scope and provenance
 

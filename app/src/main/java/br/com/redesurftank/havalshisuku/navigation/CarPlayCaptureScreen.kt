@@ -71,6 +71,13 @@ fun CarPlayCaptureScreen(onBackToFeatures: () -> Unit) {
                 Text(status.message, color = AppColors.TextPrimary, fontSize = 20.sp)
                 Text("Serviço: ${if (status.connected) "Binder conectado" else "sem conexão"}", color = AppColors.TextSecondary)
                 Text("Callbacks: ${status.callbacks} · Erros: ${status.errors} · Descartados: ${status.dropped}", color = AppColors.TextSecondary)
+                Text("Nulos: ${status.summary.empty} · Sem rota elegível: ${status.summary.inactive}", color = AppColors.TextSecondary)
+                Text("Potencialmente úteis: ${status.summary.candidates} · Não confirmados: ${status.summary.unconfirmed}", color = AppColors.TextSecondary)
+                Text("Os contadores são desta sessão. Serviço conectado ou callback recebido não garante orientação ativa nem mapa limpo.",
+                    color = AppColors.TextSecondary)
+                val end = if (status.running) now else status.stoppedAtMs
+                val duration = if (status.startedAtMs == 0L) 0L else ((end - status.startedAtMs).coerceAtLeast(0L) / 1_000L)
+                Text("Duração: ${duration / 60}min ${duration % 60}s", color = AppColors.TextSecondary)
                 val age = if (status.lastCallbackMs == 0L) "nenhum" else "há ${(now - status.lastCallbackMs) / 1_000}s"
                 Text("Último callback: $age", color = AppColors.TextSecondary)
                 Text("Estado bruto: ${status.routeState ?: "—"} · Manobra bruta: ${status.maneuver ?: "—"}", color = AppColors.TextSecondary)
@@ -83,6 +90,10 @@ fun CarPlayCaptureScreen(onBackToFeatures: () -> Unit) {
             OutlinedButton(onClick = { CarPlayNavigationCapture.mark("apple_maps") }, enabled = status.running) { Text("Apple Maps") }
             OutlinedButton(onClick = { CarPlayNavigationCapture.mark("waze") }, enabled = status.running) { Text("Waze") }
             OutlinedButton(onClick = { CarPlayNavigationCapture.mark("incident") }, enabled = status.running) { Text("Marcar evento") }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(onClick = { CarPlayNavigationCapture.mark("route_start") }, enabled = status.running) { Text("Início da rota") }
+            OutlinedButton(onClick = { CarPlayNavigationCapture.mark("route_end") }, enabled = status.running) { Text("Fim da rota") }
         }
     }
 }
