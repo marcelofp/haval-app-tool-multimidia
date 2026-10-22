@@ -12,6 +12,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -32,10 +33,12 @@ fun CarPlayCaptureScreen(onBackToFeatures: () -> Unit) {
     val context = LocalContext.current
     var status by remember { mutableStateOf(CarPlayNavigationCapture.status) }
     var now by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
+    var experimentalHud by remember { mutableStateOf(CarPlayExperimentalHud.enabled) }
     LaunchedEffect(Unit) {
         while (true) {
             status = CarPlayNavigationCapture.status
             now = SystemClock.elapsedRealtime()
+            experimentalHud = CarPlayExperimentalHud.enabled
             delay(1_000L)
         }
     }
@@ -64,6 +67,19 @@ fun CarPlayCaptureScreen(onBackToFeatures: () -> Unit) {
                         Text("Encerrar captura")
                     }
                 }
+            }
+        }
+        StyledCard {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Texto CarPlay no HUD nativo · experimental", color = AppColors.TextPrimary, fontSize = 20.sp)
+                Text("Ative apenas parado ou pelo passageiro, após iniciar a captura. Mostra via após a manobra e distância no HUD nativo já configurado em Navegação/AR. " +
+                    "Sem setas, ETA ou mapa limpo; não altera temas. Android Auto com rota ativa tem prioridade. " +
+                    "Desliga ao encerrar a captura ou reiniciar o app. Silêncio de 5 segundos retira os dados (o HUD pode levar mais 5 segundos para ocultar o card).",
+                    color = AppColors.TextSecondary)
+                Switch(checked = experimentalHud, onCheckedChange = {
+                    CarPlayExperimentalHud.setEnabled(it)
+                    CarPlayNavigationCapture.mark(if (it) "experimental_hud_on" else "experimental_hud_off")
+                }, enabled = status.running)
             }
         }
         StyledCard {

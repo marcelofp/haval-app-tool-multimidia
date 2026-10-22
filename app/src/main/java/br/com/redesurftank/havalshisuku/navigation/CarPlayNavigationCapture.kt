@@ -112,6 +112,7 @@ object CarPlayNavigationCapture {
                     view = view.copy(directory = directory.absolutePath)
                     startedAtMs = SystemClock.elapsedRealtime()
                     view = view.copy(startedAtMs = startedAtMs)
+                    CarPlayExperimentalHud.begin(id)
                     if (!record("capture_start", JSONObject().put("versionCode", BuildConfig.VERSION_CODE)
                         .put("versionName", BuildConfig.VERSION_NAME).put("mode", "diagnostic_only"))) return@post
                     val checks = CarPlayGuidanceParcel.selfTest()
@@ -216,6 +217,7 @@ object CarPlayNavigationCapture {
                 active.registered = subscribe(active, 7)
                 require(active.registered) { "subscription refused" }
                 failures = 0
+                CarPlayExperimentalHud.connect(id, active.number)
                 view = view.copy(connected = true, message = "Serviço conectado; aguardando dados de rota", routeState = null, maneuver = null,
                     summary = view.summary.copy(lastKind = null))
                 record("subscription_sent", JSONObject().put("generation", active.number))
@@ -238,6 +240,7 @@ object CarPlayNavigationCapture {
         }
 
         private fun release(active: Binding) {
+            CarPlayExperimentalHud.disconnect(id, active.number)
             if (binding === active) binding = null
             if (active.registered) {
                 runCatching { subscribe(active, 8) }
@@ -299,6 +302,7 @@ object CarPlayNavigationCapture {
                             terminate("Callback incompatível; captura interrompida")
                         } else {
                             val raw = parsed.getOrNull()
+                            CarPlayExperimentalHud.onCarPlay(id, owner.number, raw, receivedAt)
                             val summary = view.summary.received(raw)
                             view = view.copy(callbacks = view.callbacks + 1, lastCallbackMs = receivedAt,
                                 routeState = raw?.mRouteGuidanceState, maneuver = raw?.mManeuverType,
@@ -352,6 +356,7 @@ object CarPlayNavigationCapture {
             if (writeEnd) record("capture_stop", captureCounts(stoppedAtMs).put("reason", message))
             if (ended) return
             ended = true
+            CarPlayExperimentalHud.end(id)
             gate.close()
             worker.removeCallbacks(tick)
             binding?.let { release(it) }
