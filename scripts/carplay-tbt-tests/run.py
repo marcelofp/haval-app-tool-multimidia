@@ -9,7 +9,10 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = "br/com/redesurftank/havalshisuku/navigation"
-CLASSES = ["CarPlayGuidanceTest", "PreparedNavigationArbiterTest"]
+CLASSES = ["CarPlayGuidanceTest", "PreparedNavigationArbiterTest", "CarPlayGuidanceReaderTest",
+           "CarPlayCaptureFilesTest", "CarPlayCaptureGateTest"]
+SOURCES = ["CarPlayGuidance.kt", "PreparedNavigationArbiter.kt", "CarPlayGuidanceReader.kt",
+           "CarPlayCaptureFiles.kt", "CarPlayCaptureGate.kt"]
 
 
 def main():
@@ -32,10 +35,10 @@ def main():
     if not java:
         parser.error("java (JDK 11+) is required")
     classpath = os.pathsep.join(str(deps / name) for name in required)
-    sources = sorted((ROOT / "app/src/main/java" / PACKAGE).glob("*.kt"))
-    tests = sorted((ROOT / "app/src/test/java" / PACKAGE).glob("*.kt"))
-    if len(sources) != 2 or len(tests) != 2:
-        parser.error("Expected exactly two production Kotlin files and two test files")
+    sources = [ROOT / "app/src/main/java" / PACKAGE / name for name in SOURCES]
+    tests = [ROOT / "app/src/test/java" / PACKAGE / (name + ".kt") for name in CLASSES]
+    if not all(path.is_file() for path in sources + tests):
+        parser.error("Missing pure Kotlin production or test source")
     with tempfile.TemporaryDirectory(prefix="carplay-tbt-jvm-") as temporary:
         output = Path(temporary) / "classes"
         output.mkdir()

@@ -1,6 +1,6 @@
 # Pure Kotlin CarPlay preparation tests
 
-These tests compile the **actual** new Kotlin sources and run JUnit4 on a normal JVM.
+These tests compile the **actual** five pure Kotlin sources and run JUnit4 on a normal JVM.
 All guidance/session/clock inputs are synthetic. No Android fakes, Binder calls, OEM code,
 car access, side effects or downloaded dependencies are part of this runner.
 
@@ -40,5 +40,11 @@ Coverage: 11 raw fields, null/unknown/extreme values, every known route state/un
 localized distance ambiguity, all 54 unmapped maneuver IDs, angle/time withholding,
 AA priority, linked-vs-active distinction, source transfers, stale session identities,
 non-owner cleanup, fixed-deadline coalescing, reset, snapshot immutability and 6,000 seeded
-session events. No Parcel parser exists here, so malformed/truncated Parcel tests remain
-a separate required gate before a Binder adapter is enabled.
+session events. The diagnostic extension adds typed/truncated reader tests, rotating-file
+bounds and failure handling, and concurrent queue admission/stop tests. The Android
+Parcel adapter is excluded from this JVM runner; it runs a real-Parcel self-test on the
+head unit before any subscription. See `docs/architecture/carplay-navigation-capture.md`.
+
+For projects under `/root/projects`, all Kotlin/Android builds, including this standalone
+compiler runner, must execute through the authorized Mac Mini workflow. Do not run it on
+the coordinator as a fallback.
