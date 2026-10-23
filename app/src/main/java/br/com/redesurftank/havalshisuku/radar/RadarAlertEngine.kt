@@ -139,7 +139,8 @@ class RadarAlertEngine {
                         along = w.along
                     }
                 }
-                is Where.Behind -> if (w.by > PASSED_M) drop(t, fix) else along = 0.0
+                // [by] is from the shifted point: the camera itself is [POSITION_EARLY_M] further.
+                is Where.Behind -> if (w.by > PASSED_M + POSITION_EARLY_M) drop(t, fix) else along = 0.0
                 Where.Off -> {
                     // Parked or crawling, the heading is stale: keep the target as it was.
                     if (isMoving(fix)) t.offFixes++

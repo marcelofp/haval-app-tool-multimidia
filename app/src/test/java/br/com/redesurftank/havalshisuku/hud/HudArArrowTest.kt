@@ -149,12 +149,6 @@ class HudArArrowTest {
         val way = (Math.PI * HudArArrow.RB_RADIUS_M).toFloat() // 180° on a 15 m ring
         assertEquals(0.5f, HudArArrow.roundaboutProgress(way / 2, 180f), 0.01f)
         assertEquals(1f, HudArArrow.roundaboutProgress(way * 3, 180f), 0f)
-        // No jump at the entry: still approaching while the distance is longer than the ring,
-        // then the left icon closes as the metres left to the exit fall.
-        assertEquals(0f, HudArArrow.progressFromExitDistance(way + 40f, 180f), 0f)
-        assertEquals(0f, HudArArrow.progressFromExitDistance(way, 180f), 0f)
-        assertEquals(0.5f, HudArArrow.progressFromExitDistance(way / 2f, 180f), 0.02f)
-        assertEquals(1f, HudArArrow.progressFromExitDistance(0f, 180f), 0f)
     }
 
     @Test
@@ -399,7 +393,8 @@ class HudArArrowTest {
     fun `destination - flag beside the arrow's end, on AA's side`() {
         assertEquals(-1, HudArArrow.destinationSide("DESTINATION_LEFT"))
         assertEquals(1, HudArArrow.destinationSide("DESTINATION_RIGHT"))
-        assertEquals(0, HudArArrow.destinationSide("DESTINATION"))
+        // No side from AA: the right curb, not the middle of the road.
+        assertEquals(1, HudArArrow.destinationSide("DESTINATION"))
         assertNull(HudArArrow.destinationSide("TURN_RIGHT"))
         val leftShape = HudArArrow.destination(60f, -1)
         val rightShape = HudArArrow.destination(60f, 1)
@@ -442,6 +437,24 @@ class HudArArrowTest {
         assertEquals(1, first.chevrons!!.side)
         // The map view is used: a route on the roads.
         assertTrue(first.tbt!!.route != null)
+    }
+
+    @Test
+    fun `roundabout - the 2026-10-22 drive replayed (approach to the entry, jump, lap, next leg)`() {
+        val t = RoundaboutTracker()
+        val step = HudOverlayModel.roundaboutIdentity(6, 315, false, 35)
+        // AA's distance is to the entry while approaching: no lap yet, however close.
+        for (m in listOf(100f, 82f, 59f, 38f, 16f, 7f, 2f)) {
+            assertTrue(!t.onUpdate(step, m))
+            assertEquals(0f, t.progress(m), 0f)
+        }
+        // On the ring: the 157 m lap (identity kept, the exit pair is held across ROUNDABOUT_EXIT).
+        assertTrue(t.onUpdate(step, 157f))
+        assertEquals(0.5f, t.progress(78.5f), 0.01f)
+        assertEquals(1f, t.progress(5f), 0.05f)
+        // AA's last sample of this step carries the next leg (437 m): the exit is done, not 0.
+        t.onUpdate(step, 437f)
+        assertEquals(1f, t.progress(437f), 0f)
     }
 
     @Test

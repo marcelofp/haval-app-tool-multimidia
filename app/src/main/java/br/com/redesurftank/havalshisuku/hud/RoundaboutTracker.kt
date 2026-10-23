@@ -50,10 +50,14 @@ class RoundaboutTracker {
     private fun isEntry(low: Float, meters: Float?): Boolean =
         meters != null && low <= ENTRY_M && meters >= low + JUMP_M && meters <= MAX_EXIT_M
 
-    /** 0 at the entry .. 1 at the exit, from AA's distance [currentM] now. */
+    /**
+     * 0 at the entry .. 1 at the exit, from AA's distance [currentM] now. A reading well above
+     * the lap is the next leg's (AA's last sample of this step after the exit): done, not 0.
+     */
     fun progress(currentM: Float): Float {
         val start = startM ?: return 0f
-        return if (start <= 0f) 1f else (1f - currentM / start).coerceIn(0f, 1f)
+        if (start <= 0f || currentM > start + JUMP_M) return 1f
+        return (1f - currentM / start).coerceIn(0f, 1f)
     }
 
     companion object {

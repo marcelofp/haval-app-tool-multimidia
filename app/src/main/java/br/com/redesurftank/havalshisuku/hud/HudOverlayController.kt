@@ -304,10 +304,10 @@ object HudOverlayController {
 
     /**
      * How far round the ring the left-hand icon is. From AA's countdown once a jump at the entry
-     * says the car is on the ring ([rbTracker]). A real drive often never jumps — the distance
-     * just keeps falling to the exit — so then the icon follows that distance once it is inside
-     * the ring (the demo keeps the jump, it is scripted). Last resort: speed since the distance
-     * reached ~0. 0 before the roundabout or on other maneuvers.
+     * says the car is on the ring ([rbTracker]). Until then AA's distance is to the entry
+     * (drive log 2026-10-22: 100 -> 2 m, then the 157 m lap), so it never counts as the lap.
+     * Without a jump: speed since the distance reached ~0. 0 before the roundabout or on
+     * other maneuvers.
      */
     private fun roundaboutProgress(): Float {
         val dirs = (demoDirections ?: navDirections)?.takeIf { it.active }
@@ -320,10 +320,6 @@ object HudOverlayController {
         // Prefer AA's exit countdown once the entry jump is known — even if this tick's
         // turn_angle was briefly zeroed (telemetry normally holds the approach pair).
         if (rbTracker.entered && meters != null) return rbTracker.progress(meters)
-        if (isRoundabout && travel != null && meters != null && demoDirections == null) {
-            val along = HudArArrow.progressFromExitDistance(meters, travel.toFloat())
-            if (along > 0f) return along
-        }
         val speedFallback = config().layout == HudOverlayModel.Layout.AR && isRoundabout && travel != null
         if (!speedFallback || meters == null || meters > 3f) {
             roundaboutZeroAtMs = 0L
