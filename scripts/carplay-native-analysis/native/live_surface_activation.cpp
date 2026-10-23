@@ -117,7 +117,7 @@ HookInstallResult activateLiveSurface(std::int64_t surfaceHandle, std::uint32_t 
             activeApiOwner.reset();
             return HookInstallResult::rejected;
         }
-        auto secondaryOwner = std::shared_ptr<void>(const_cast<void*>(secondary),
+        auto secondaryOwner = std::shared_ptr<void>(static_cast<void*>(secondary),
             [api](void* value) noexcept { if (value) { api->release(value); } });
         auto lifetime = std::make_shared<ActivationLifetime>(ActivationLifetime{api, secondaryOwner});
 

@@ -4,8 +4,9 @@
 
 `cold_passthrough_controller.py` stages and verifies the reviewed bridge/launcher,
 then can coordinate the bounded cold gate through `armed -> installed-pinned`.
-It refuses active visual CarPlay/Android Auto tasks and never enables AltScreen,
-a secondary decoder, Surface/display-3 routing or SystemUI actions. Details and
+It refuses active visual CarPlay/Android Auto tasks. After passthrough publication
+it arms the inert authenticated clean-map control script; no AltScreen, decoder
+or Surface exists until the Impulse five-minute test explicitly requests it. Details and
 the controlled commands are in
 [carplay-cold-passthrough-controller.md](../../docs/architecture/carplay-cold-passthrough-controller.md).
 The controller itself has not run against the OEM process yet; the vehicle was

@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Coordinate the first cold OEM CarPlay passthrough validation.
 
-This controller deliberately stops before the secondary-display experiment.  It
-stages the reviewed native bridge and launcher, opens the bounded gate already
-present in the vetted TsCarPlayService patch, installs the nine passthrough
-entries, and releases normal OEM startup.  It never advertises an AltScreen,
-creates a display, changes a Surface, or moves a CarPlay task.
+This controller installs the reviewed cold passthrough entries and then arms the
+inert clean-map Binder control plane. The second stage does not advertise an
+AltScreen, create a display or change a Surface until the Impulse app sends its
+explicit test broadcast.
 
 The live command is intentionally explicit because it terminates only the idle
 OEM host process.  The patched service's normal ActivityManager binding starts a
@@ -39,6 +38,8 @@ CONTROL_ROOT = "/data/local/tmp/impulse-carplay/control"
 REMOTE_BRIDGE = f"{STAGE_ROOT}/libcarplay_video_bridge.so"
 REMOTE_LAUNCHER = f"{STAGE_ROOT}/cold-launcher.js"
 REMOTE_LOG = f"{STAGE_ROOT}/injector.log"
+REMOTE_ENDPOINT_LAUNCHER = f"{STAGE_ROOT}/clean-map-endpoint.js"
+REMOTE_ENDPOINT_LOG = f"{STAGE_ROOT}/clean-map-endpoint.log"
 REMOTE_INJECTOR = "/data/local/tmp/fridainjector"
 REMOTE_SERVICE_PATCH = "/data/local/tmp/carplay_patches/TsCarPlayService.apk"
 MOUNTED_SERVICE = "/vendor/app/TsCarPlayService/TsCarPlayService.apk"
@@ -95,6 +96,18 @@ def classify_injector_log(log: str) -> str:
         log,
     )
     return phases[-1] if phases else "unknown"
+
+
+def endpoint_launcher(source: str) -> str:
+    if "Persistent OEM-process control plane" not in source or "rpc.exports" not in source:
+        raise ValueError("unexpected clean-map endpoint source")
+    return source.rstrip() + f"""
+
+rpc.exports.arm({{ bridgePath: {json.dumps(REMOTE_BRIDGE)} }}).then(
+    state => send({{ kind: 'impulse-carplay-clean-map-control', state }}),
+    error => send({{ kind: 'impulse-carplay-clean-map-control', state: 'failed', error: String(error) }})
+);
+"""
 
 
 def shell_quote(value: str) -> str:
@@ -201,12 +214,13 @@ class Inputs:
     bridge: Path
     interceptor: Path
     profile: Path
+    endpoint: Path
 
-    def read(self) -> tuple[bytes, str, object]:
+    def read(self) -> tuple[bytes, str, object, str]:
         bridge = self.bridge.read_bytes()
         interceptor = self.interceptor.read_text(encoding="utf-8")
         profile = json.loads(self.profile.read_text(encoding="utf-8"))
-        return bridge, interceptor, profile
+        return bridge, interceptor, profile, self.endpoint.read_text(encoding="utf-8")
 
 
 class ColdPassthroughController:
@@ -235,20 +249,24 @@ class ColdPassthroughController:
         return values
 
     def stage(self) -> dict[str, str | int]:
-        bridge, interceptor, profile = self.inputs.read()
+        bridge, interceptor, profile, endpoint = self.inputs.read()
         bridge_sha = sha256_bytes(bridge)
         template = launcher_template(interceptor, profile, len(bridge), bridge_sha).encode()
+        endpoint_script = endpoint_launcher(endpoint).encode()
         self.remote.run(
             f"mkdir -p {shell_quote(STAGE_ROOT)} {shell_quote(CONTROL_ROOT)}; "
             f"chmod 700 {shell_quote(STAGE_ROOT)} {shell_quote(CONTROL_ROOT)}; "
-            f"rm -f {shell_quote(REMOTE_LOG)} {shell_quote(CONTROL_ROOT)}/release.*"
+            f"rm -f {shell_quote(REMOTE_LOG)} {shell_quote(REMOTE_ENDPOINT_LOG)} "
+            f"{shell_quote(CONTROL_ROOT)}/release.*"
         )
         self.remote.upload(bridge, REMOTE_BRIDGE, "500")
         self.remote.upload(template, REMOTE_LAUNCHER, "600")
+        self.remote.upload(endpoint_script, REMOTE_ENDPOINT_LAUNCHER, "600")
         return {
             "bridgeSize": len(bridge),
             "bridgeSha256": bridge_sha,
             "launcherTemplateSha256": sha256_bytes(template),
+            "endpointLauncherSha256": sha256_bytes(endpoint_script),
         }
 
     def _wait_new_pid(self, old_pid: str, deadline: float) -> int:
@@ -308,7 +326,7 @@ class ColdPassthroughController:
             if re.search(r"libAirPlay_ts|libcarplaystack|libCoreUtils_ts", maps):
                 raise ControllerError("OEM libraries loaded before injector arming; refusing warm interception")
 
-            bridge, interceptor, profile = self.inputs.read()
+            bridge, interceptor, profile, _ = self.inputs.read()
             exact = launcher_for_pid(interceptor, profile, self.pid, len(bridge), sha256_bytes(bridge)).encode()
             template_needle = f'"expectedPid":{PID_PLACEHOLDER}'
             self.remote.run(
@@ -336,11 +354,29 @@ class ColdPassthroughController:
             phase, log = self._wait_phase({"installed-pinned", "failed", "failed-pinned"}, time.monotonic() + 8.0)
             if phase != "installed-pinned":
                 raise ControllerError(f"Cold interceptor did not install passthrough (phase={phase}): {log[-1200:]}")
+            self.remote.run(
+                f"setsid {REMOTE_INJECTOR} -D local -p {self.pid} -s {REMOTE_ENDPOINT_LAUNCHER} "
+                f"> {REMOTE_ENDPOINT_LOG} 2>&1 < /dev/null &"
+            )
+            endpoint_deadline = time.monotonic() + 8.0
+            endpoint_log = ""
+            while time.monotonic() < endpoint_deadline:
+                endpoint_log = self.remote.run(
+                    f"tail -n 80 {REMOTE_ENDPOINT_LOG} 2>/dev/null || true", check=False
+                )
+                if '"state":"armed"' in endpoint_log:
+                    break
+                if '"state":"failed"' in endpoint_log:
+                    raise ControllerError(f"Clean-map endpoint failed to arm: {endpoint_log[-1200:]}")
+                time.sleep(0.1)
+            else:
+                raise ControllerError(f"Clean-map endpoint did not arm: {endpoint_log[-1200:]}")
             return {
                 **staged,
                 "pid": self.pid,
                 "phase": phase,
                 "injectorLog": REMOTE_LOG,
+                "endpointLog": REMOTE_ENDPOINT_LOG,
             }
         finally:
             # Clearing the property and releasing a still-waiting gate are safe
@@ -358,6 +394,7 @@ def default_inputs() -> Inputs:
         bridge=Path("/root/projects/haval-impulse/artifacts/carplay-131-6d725462-debug/native/libcarplay_video_bridge.so"),
         interceptor=root / "cold_oem_interceptor.js",
         profile=root / "testdata/oem-cold-profile-v3.json",
+        endpoint=root / "carplay_clean_map_endpoint.js",
     )
 
 

@@ -4,9 +4,10 @@
 
 `scripts/carplay-native-analysis/cold_passthrough_controller.py` coordena o
 primeiro teste do interceptor frio no processo OEM. Ele instala os nove pontos
-revisados somente na rota de passthrough. Não anuncia `AltScreen`, não cria
-decoder secundário, não abre/move Activity, não altera Surface, resolução,
-SystemUI, Android Auto ou display 3.
+revisados inicialmente na rota de passthrough. Depois, fixa um controle Binder
+inerte que não anuncia `AltScreen`, não cria decoder, não abre/move Activity e
+não altera Surface, resolução, SystemUI, Android Auto ou display 3 até o pedido
+explícito do teste de cinco minutos no Impulse.
 
 Esse teste responde uma pergunta anterior ao mapa limpo: os hooks podem nascer
 antes das bibliotecas OEM, permanecer presos ao processo e preservar o CarPlay

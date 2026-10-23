@@ -5,6 +5,7 @@ from pathlib import Path
 from cold_passthrough_controller import (
     PID_PLACEHOLDER,
     classify_injector_log,
+    endpoint_launcher,
     launcher_template,
     sha256_bytes,
     specialize_launcher,
@@ -49,6 +50,16 @@ class ColdPassthroughControllerTest(unittest.TestCase):
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
             sha256_bytes(b"abc"),
         )
+
+    def test_endpoint_launcher_arms_exact_staged_bridge(self):
+        source = (ROOT / "carplay_clean_map_endpoint.js").read_text(encoding="utf-8")
+        launcher = endpoint_launcher(source)
+        self.assertIn("/data/local/tmp/impulse-carplay/passthrough-v1/libcarplay_video_bridge.so", launcher)
+        self.assertEqual(1, launcher.count("rpc.exports.arm({ bridgePath:"))
+
+    def test_endpoint_launcher_rejects_unknown_source(self):
+        with self.assertRaises(ValueError):
+            endpoint_launcher("rpc.exports = {}")
 
 
 if __name__ == "__main__":
