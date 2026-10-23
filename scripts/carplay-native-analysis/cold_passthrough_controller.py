@@ -311,7 +311,7 @@ class ColdPassthroughController:
             f"old={shell_quote(old)}; sleep 0.3; fresh=\"$(pidof {OEM_PROCESS})\"; "
             "if [ -z \"$fresh\" ] || [ \"$fresh\" = \"$old\" ]; then "
             "component=$(printf 'com.ts.carplay/.\\103ar\\120lay\\123ervice'); "
-            "am startservice -n \"$component\" >/dev/null; fi; "
+            "am startservice -n \"$component\" >/dev/null 2>&1 & fi; "
             "attempt=0; while [ $attempt -lt 40 ]; do "
             f"fresh=\"$(pidof {OEM_PROCESS})\"; "
             "if [ -n \"$fresh\" ] && [ \"$fresh\" != \"$old\" ]; then break; fi; "
