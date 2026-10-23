@@ -7,6 +7,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.RemoteException;
+import android.util.DisplayMetrics;
 import android.view.Surface;
 import android.view.TextureView;
 
@@ -140,10 +141,22 @@ public final class CarPlaySecondarySurfaceConsumer extends TextureView
             return;
         }
         lease = created;
+        DisplayMetrics metrics = new DisplayMetrics();
+        getDisplay().getRealMetrics(metrics);
+        final int widthMillimeters;
+        final int heightMillimeters;
+        try {
+            widthMillimeters = millimeters(width, metrics.xdpi);
+            heightMillimeters = millimeters(height, metrics.ydpi);
+        } catch (IllegalArgumentException failure) {
+            notifyFailure(Failure.INVALID_SURFACE);
+            close();
+            return;
+        }
         worker.execute(() -> {
             try {
                 CarPlaySurfaceEndpoint.grant(active.endpoint, active.token, active.generation,
-                    created.surface, active.owner);
+                    created.surface, active.owner, 30, widthMillimeters, heightMillimeters);
                 main.post(() -> {
                     if (!closed && lease == created && !active.dead.get()) {
                         try { listener.onReady(active.generation, width, height); }
@@ -273,5 +286,16 @@ public final class CarPlaySecondarySurfaceConsumer extends TextureView
         if (Looper.myLooper() != Looper.getMainLooper()) {
             throw new IllegalStateException("Consumer lifecycle requires main thread");
         }
+    }
+
+    private static int millimeters(int pixels, float dotsPerInch) {
+        if (pixels <= 0 || !Float.isFinite(dotsPerInch) || dotsPerInch <= 0f) {
+            throw new IllegalArgumentException("Valid display density required");
+        }
+        int value = Math.round((pixels / dotsPerInch) * 25.4f);
+        if (value <= 0 || value > 2000) {
+            throw new IllegalArgumentException("Physical display geometry out of range");
+        }
+        return value;
     }
 }

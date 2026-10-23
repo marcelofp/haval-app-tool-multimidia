@@ -13,6 +13,8 @@ add_library(carplay_video_bridge SHARED
     oem_ingress.cpp
     decoder_lease.cpp
     android_surface_transport.cpp
+    surface_runtime_preparation.cpp
+    live_surface_activation.cpp
     secondary_advertisement.cpp
     secondary_session.cpp
     secondary_runtime.cpp

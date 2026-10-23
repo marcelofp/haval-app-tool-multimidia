@@ -779,6 +779,11 @@ void realEntryShapeAndSessionCapture() {
     assert(startSession() == 0);
     auto old = capture->capture();
     assert(capture->isCurrent(old) && uuidOwners == 1);
+    assert(oemEntryPrincipalEpoch() == old.epoch);
+    assert(!preparePinnedOemEntryBridge({}));
+    auto unpublished = preparePinnedOemEntryBridge(
+        [original] { return makeAdapter(false, true, original, entryOriginalSession); });
+    assert(unpublished && unpublished->makeAdapter());
     impulse_carplay_entry_stop(stream(secondaryKey));
     assert(capture->isCurrent(old));
     impulse_carplay_entry_stop(stream(mainKey));

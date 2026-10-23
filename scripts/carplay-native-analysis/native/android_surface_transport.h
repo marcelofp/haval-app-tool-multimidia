@@ -7,6 +7,7 @@
 namespace carplay_experiment {
 
 bool surfaceRouteReady(std::int64_t handle);
+std::optional<std::pair<std::uint32_t, std::uint32_t>> surfaceGeometry(std::int64_t handle);
 
 struct SurfaceSessionBinding {
     std::shared_ptr<SecondarySession> session;

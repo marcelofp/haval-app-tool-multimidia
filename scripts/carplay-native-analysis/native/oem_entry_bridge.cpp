@@ -17,13 +17,24 @@ observed_abi::Status entry(Action&& action) noexcept {
 
 OemEntryBridge::OemEntryBridge(DispatchTargets originals, std::string principalUuid, UuidReader reader,
     LiveSessionCapture::RetainUuid retain, std::shared_ptr<void> nativeOwners)
-    : nativeOwners_(std::move(nativeOwners)),
-      capture_(std::make_shared<LiveSessionCapture>(std::move(principalUuid), std::move(reader), std::move(retain))),
-      dispatch_(std::make_shared<CoordinatedDispatch>(originals, capture_)) {
+    : originals_(originals), reader_(std::move(reader)), nativeOwners_(std::move(nativeOwners)),
+      capture_(std::make_shared<LiveSessionCapture>(std::move(principalUuid), reader_, std::move(retain))),
+      dispatch_(std::make_shared<CoordinatedDispatch>(originals_, capture_)) {
     if (!nativeOwners_) { throw std::invalid_argument("Pinned native module ownership required"); }
 }
 const std::shared_ptr<CoordinatedDispatch>& OemEntryBridge::dispatch() const noexcept { return dispatch_; }
 const std::shared_ptr<LiveSessionCapture>& OemEntryBridge::capture() const noexcept { return capture_; }
+const DispatchTargets& OemEntryBridge::originals() const noexcept { return originals_; }
+const UuidReader& OemEntryBridge::uuidReader() const noexcept { return reader_; }
+const std::shared_ptr<void>& OemEntryBridge::nativeOwners() const noexcept { return nativeOwners_; }
+std::shared_ptr<PreparedHooks> OemEntryBridge::prepare(
+    DispatchPreparedHooks::AdapterFactory factory) const {
+    if (!factory) { return {}; }
+    return std::make_shared<DispatchPreparedHooks>(dispatch_, std::move(factory),
+        [capture = capture_] { return capture->capture(); },
+        [capture = capture_](const LivePrincipal& principal) { return capture->isCurrent(principal); },
+        nativeOwners_);
+}
 void OemEntryBridge::fault() noexcept {
     faults_.fetch_add(1);
     try {
@@ -39,11 +50,23 @@ bool pinOemEntryBridge(std::unique_ptr<OemEntryBridge> bridge, bool explicitlyEn
     bridge.release();
     return true;
 }
+std::shared_ptr<PreparedHooks> preparePinnedOemEntryBridge(
+    DispatchPreparedHooks::AdapterFactory factory) {
+    auto* bridge = entryBridge.load();
+    return bridge ? bridge->prepare(std::move(factory)) : std::shared_ptr<PreparedHooks>{};
+}
+OemEntryBridge* pinnedOemEntryBridge() noexcept { return entryBridge.load(); }
 observed_abi::VideoCallbacks oemEntryCallbacks() {
     return {impulse_carplay_entry_initialize, impulse_carplay_entry_finalize, impulse_carplay_entry_dimensions,
         impulse_carplay_entry_start, impulse_carplay_entry_stop, impulse_carplay_entry_avcc, impulse_carplay_entry_data};
 }
 bool oemEntryBridgePinned() noexcept { return entryBridge.load() != nullptr; }
+std::uint64_t oemEntryPrincipalEpoch() noexcept {
+    auto* bridge = entryBridge.load();
+    if (!bridge) { return 0; }
+    try { return bridge->capture()->capture().epoch; }
+    catch (...) { return 0; }
+}
 }
 
 using namespace carplay_experiment;
@@ -92,4 +115,7 @@ extern "C" void impulse_carplay_entry_invalidate_session() noexcept {
             return 0;
         });
     }
+}
+extern "C" std::uint64_t impulse_carplay_entry_principal_epoch() noexcept {
+    return oemEntryPrincipalEpoch();
 }

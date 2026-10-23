@@ -10,9 +10,15 @@ public:
         LiveSessionCapture::RetainUuid retain, std::shared_ptr<void> nativeOwners);
     const std::shared_ptr<CoordinatedDispatch>& dispatch() const noexcept;
     const std::shared_ptr<LiveSessionCapture>& capture() const noexcept;
+    const DispatchTargets& originals() const noexcept;
+    const UuidReader& uuidReader() const noexcept;
+    const std::shared_ptr<void>& nativeOwners() const noexcept;
+    std::shared_ptr<PreparedHooks> prepare(DispatchPreparedHooks::AdapterFactory factory) const;
     void fault() noexcept;
     std::uint64_t faults() const noexcept;
 private:
+    const DispatchTargets originals_;
+    const UuidReader reader_;
     const std::shared_ptr<void> nativeOwners_;
     const std::shared_ptr<LiveSessionCapture> capture_;
     const std::shared_ptr<CoordinatedDispatch> dispatch_;
@@ -20,8 +26,12 @@ private:
 };
 
 bool pinOemEntryBridge(std::unique_ptr<OemEntryBridge> bridge, bool explicitlyEnabled = false);
+std::shared_ptr<PreparedHooks> preparePinnedOemEntryBridge(
+    DispatchPreparedHooks::AdapterFactory factory);
+OemEntryBridge* pinnedOemEntryBridge() noexcept;
 observed_abi::VideoCallbacks oemEntryCallbacks();
 bool oemEntryBridgePinned() noexcept;
+std::uint64_t oemEntryPrincipalEpoch() noexcept;
 
 }
 
@@ -41,4 +51,5 @@ carplay_experiment::observed_abi::Status impulse_carplay_entry_session(void* ses
     carplay_experiment::observed_abi::String uuid, std::uint32_t type, void* context) noexcept;
 carplay_experiment::DisplayArray impulse_carplay_entry_displays(carplay_experiment::observed_abi::Status* error) noexcept;
 void impulse_carplay_entry_invalidate_session() noexcept;
+std::uint64_t impulse_carplay_entry_principal_epoch() noexcept;
 }
