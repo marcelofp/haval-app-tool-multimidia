@@ -152,7 +152,7 @@ class HudOverlayRenderer {
             chevronPaint.alpha = (255 * appear * mark.appear * (base + (1f - base) * pulse)).toInt().coerceIn(0, 255)
             canvas.save()
             canvas.translate(mark.x, mark.y)
-            canvas.rotate(mark.dir)
+            canvas.rotate(if (ch.animate) mark.dir else -90f + (mark.dir + 90f) * ch.lean)
             canvas.drawPath(chevronPath, chevronPaint)
             canvas.restore()
         }

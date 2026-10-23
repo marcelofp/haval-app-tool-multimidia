@@ -383,6 +383,28 @@ class HudArArrowTest {
         assertNull(HudOverlayModel.frameFor(ar.copy(chevronsAlways = true), far, 0, null, speedKmh = 0.0).chevrons)
         assertNull(HudOverlayModel.frameFor(ar.copy(chevronsAlways = true), far.copy(turn = "STRAIGHT"), 0, null).chevrons)
         assertNull(HudOverlayModel.frameFor(ar.copy(chevronsAlways = true, showTurnFromM = 500), far, 0, null).chevrons)
+        // Far away it points straight up, leaning to the diagonal from 300 m to 100 m.
+        assertEquals(0f, always.lean, 0.001f)
+        assertEquals(0.5f, HudOverlayModel.frameFor(ar.copy(chevronsAlways = true), d, 0, null, arMetersOverride = 200f).chevrons!!.lean, 0.01f)
+        assertEquals(1f, HudOverlayModel.frameFor(ar.copy(chevronsAlways = true), d, 0, null, arMetersOverride = 90f).chevrons!!.lean, 0.001f)
+    }
+
+    @Test
+    fun `chevrons on a roundabout - never entering it, only near the exit`() {
+        val ar = HudOverlayModel.Config(layout = HudOverlayModel.Layout.AR, chevronsAlways = true)
+        val rb = Directions(active = true, distance = "120 m", distanceM = 120, turn = "ROUNDABOUT", exitNumber = 3, turnAngle = 270, roundaboutClockwise = false)
+        // Approaching, and just on the ring (even with Sempre): none.
+        assertNull(HudOverlayModel.frameFor(ar, rb, 0, null, arMetersOverride = 40f).chevrons)
+        // On the ring the chevrons follow AA's own distance to the exit.
+        fun left(m: Int) = rb.copy(distance = "$m m", distanceM = m)
+        assertNull(HudOverlayModel.frameFor(ar, left(120), 0, null, arProgress = 0.1f).chevrons)
+        // A small ring: within 50 m of the exit at once, but not before the first part of the lap.
+        assertNull(HudOverlayModel.frameFor(ar, left(45), 0, null, arProgress = 0.1f).chevrons)
+        // Further round, near the exit: they show the way out.
+        val exit = HudOverlayModel.frameFor(ar, left(30), 0, null, arProgress = 0.5f).chevrons!!
+        assertEquals(1, exit.side)
+        assertTrue(exit.animate)
+        assertNull(HudOverlayModel.frameFor(ar, left(80), 0, null, arProgress = 0.5f).chevrons)
     }
 
     @Test

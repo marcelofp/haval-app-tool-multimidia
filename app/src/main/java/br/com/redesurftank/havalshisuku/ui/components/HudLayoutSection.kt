@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -234,6 +236,9 @@ private fun HudLayoutCard(
 }
 
 /** Tabs of the Navegação settings dialog. */
+/** The settings dialog's fixed height (fits the 720 px screen between the status bar and the dock). */
+private val DIALOG_HEIGHT = 560.dp
+
 private enum class HudSettingsTab(val title: String) { NAVIGATION("Geral"), ARROW("Navegação"), BARS("Indicadores") }
 
 /**
@@ -273,12 +278,13 @@ private fun HudNavigationSettingsDialog(
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Card(
-            modifier = Modifier.fillMaxWidth(0.70f).padding(start = 16.dp, top = 16.dp, end = 28.dp, bottom = 16.dp),
+            // Fixed size (owner): the same box on every tab, wide enough for the descriptions.
+            modifier = Modifier.fillMaxWidth(0.84f).height(DIALOG_HEIGHT).padding(start = 16.dp, top = 16.dp, end = 28.dp, bottom = 16.dp),
             colors = CardDefaults.cardColors(containerColor = ImpTokens.Container),
             shape = RoundedCornerShape(16.dp),
             border = BorderStroke(1.5.dp, ImpTokens.Accent)
         ) {
-            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(modifier = Modifier.fillMaxHeight().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         if (layout == HudOverlayModel.Layout.AR) "Layout Navegação AR" else "Layout Navegação",
@@ -287,9 +293,9 @@ private fun HudNavigationSettingsDialog(
                         fontWeight = FontWeight.Bold
                     )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                    // Left: one tab of options at a time.
-                    Column(modifier = Modifier.weight(1f)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(24.dp), modifier = Modifier.weight(1f)) {
+                    // Left: one tab of options at a time (scrolls if a tab ever outgrows the box).
+                    Column(modifier = Modifier.weight(1.45f).fillMaxHeight().verticalScroll(rememberScrollState())) {
                         HudTabs(
                             selected = tab,
                             tabs = HudSettingsTab.entries.filter { it != HudSettingsTab.ARROW || layout == HudOverlayModel.Layout.AR },
@@ -315,14 +321,21 @@ private fun HudNavigationSettingsDialog(
                                     ) { change(config.copy(smallArrowWhenFar = it), PreviewFocus.FAR) }
                                 }
                                 if (layout != HudOverlayModel.Layout.AR) {
-                                    ChoiceRow(
+                                    OptionRow(
                                         "Setas de aproximação",
-                                        "Perto da curva, ou sempre uma junto aos arcos.",
-                                        listOf("Não", "Perto da curva", "Sempre"),
-                                        if (!config.chevrons) 0 else if (config.chevronsAlways) 2 else 1,
+                                        "Setas azuis para o lado da curva.",
+                                        config.chevrons,
                                         enabled = config.navigation,
-                                        info = "Perto da curva: de 100 m uma seta azul na diagonal do lado da curva; de 50 m mais setas surgem nessa diagonal e, em curva fechada, sobem para a borda de cima apontando para o lado; em curva suave (45°) seguem pela diagonal. Sempre: além disso, uma seta parada junto aos arcos a qualquer distância, apontando para o lado da próxima rua. Somem com o carro parado."
-                                    ) { change(config.copy(chevrons = it > 0, chevronsAlways = it == 2), PreviewFocus.CHEVRONS) }
+                                        info = "De 100 m, uma seta azul na diagonal do lado da curva; de 50 m mais setas surgem nessa diagonal e, em curva fechada, sobem para a borda de cima apontando para o lado; em curva suave (45°) seguem pela diagonal. Na rotatória, só perto da saída. Somem com o carro parado."
+                                    ) { change(config.copy(chevrons = it), PreviewFocus.CHEVRONS) }
+                                    ChoiceRow(
+                                        "Quando mostrar as setas",
+                                        "Só perto da curva, ou sempre uma.",
+                                        listOf("Perto da curva", "Sempre"),
+                                        if (config.chevronsAlways) 1 else 0,
+                                        enabled = config.navigation && config.chevrons,
+                                        info = "Sempre: além da animação perto da curva, uma seta parada junto aos arcos a qualquer distância, do lado da próxima rua. Longe ela aponta para frente e vai se inclinando para a diagonal ao chegar perto (de 300 m a 100 m)."
+                                    ) { change(config.copy(chevronsAlways = it == 1), PreviewFocus.CHEVRONS) }
                                 }
                                 OptionRow(
                                     "Distância e tempo restantes",
@@ -363,14 +376,21 @@ private fun HudNavigationSettingsDialog(
                                     enabled = config.navigation && config.mapStreets,
                                     info = "Preenchidas: as ruas em cinza claro. Contorno: só as linhas das bordas das ruas, deixando o HUD mais limpo e a rota azul em destaque."
                                 ) { change(config.copy(mapEdges = it == 1)) }
-                                ChoiceRow(
+                                OptionRow(
                                     "Setas de aproximação",
-                                    "Perto da curva, ou sempre uma junto aos arcos.",
-                                    listOf("Não", "Perto da curva", "Sempre"),
-                                    if (!config.chevrons) 0 else if (config.chevronsAlways) 2 else 1,
+                                    "Setas azuis para o lado da curva.",
+                                    config.chevrons,
                                     enabled = config.navigation,
-                                    info = "Perto da curva: de 100 m uma seta azul na diagonal do lado da curva; de 50 m mais setas surgem nessa diagonal e, em curva fechada, sobem para a borda de cima apontando para o lado; em curva suave (45°) seguem pela diagonal. Sempre: além disso, uma seta parada junto aos arcos a qualquer distância, apontando para o lado da próxima rua. Somem com o carro parado."
-                                ) { change(config.copy(chevrons = it > 0, chevronsAlways = it == 2), PreviewFocus.CHEVRONS) }
+                                    info = "De 100 m, uma seta azul na diagonal do lado da curva; de 50 m mais setas surgem nessa diagonal e, em curva fechada, sobem para a borda de cima apontando para o lado; em curva suave (45°) seguem pela diagonal. Na rotatória, só perto da saída. Somem com o carro parado."
+                                ) { change(config.copy(chevrons = it), PreviewFocus.CHEVRONS) }
+                                ChoiceRow(
+                                    "Quando mostrar as setas",
+                                    "Só perto da curva, ou sempre uma.",
+                                    listOf("Perto da curva", "Sempre"),
+                                    if (config.chevronsAlways) 1 else 0,
+                                    enabled = config.navigation && config.chevrons,
+                                    info = "Sempre: além da animação perto da curva, uma seta parada junto aos arcos a qualquer distância, do lado da próxima rua. Longe ela aponta para frente e vai se inclinando para a diagonal ao chegar perto (de 300 m a 100 m)."
+                                ) { change(config.copy(chevronsAlways = it == 1), PreviewFocus.CHEVRONS) }
                             }
                             HudSettingsTab.BARS -> {
                                 // Each layout keeps its own: Navegação bars, Navegação AR arcs by default.
@@ -400,8 +420,8 @@ private fun HudNavigationSettingsDialog(
                             }
                         }
                     }
-                    // Right: what the HUD will show with these options.
-                    Column(modifier = Modifier.weight(1.1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // Right: what the HUD will show with these options, the buttons under it.
+                    Column(modifier = Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         HudPreview(
                             config = shown.copy(layout = layout),
                             description = "Prévia com estas opções",
@@ -414,13 +434,12 @@ private fun HudNavigationSettingsDialog(
                             color = ImpTokens.TextSecondary,
                             fontSize = 12.sp
                         )
+                        Spacer(Modifier.weight(1f))
+                        DemoDriveButton(layout, Modifier.fillMaxWidth())
+                        OutlinedButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                            Text("Fechar", fontWeight = FontWeight.Bold)
+                        }
                     }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(onClick = onDismiss) {
-                        Text("Fechar", fontWeight = FontWeight.Bold)
-                    }
-                    DemoDriveButton(layout, Modifier.weight(1f))
                 }
             }
         }

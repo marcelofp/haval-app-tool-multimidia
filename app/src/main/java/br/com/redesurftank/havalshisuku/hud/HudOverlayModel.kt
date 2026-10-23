@@ -478,6 +478,10 @@ object HudOverlayModel {
     const val CHEVRON_GROW = 0.35f
     /** Spacing along the diagonal (tighter than the top row's, it is short on room). */
     const val CHEVRON_DIAG_SPACING = 11f
+    /** "Sempre": the still chevron points straight up from this far, leaning to the diagonal by [CHEVRON_SHOW_M]. */
+    const val CHEVRON_ALWAYS_UP_M = 300f
+    /** On a roundabout's ring: only this far round it (never while entering, owner 2026-10-23). */
+    const val RB_CHEVRON_MIN_PROGRESS = 0.3f
     /** How far a soft turn's strip slides up its diagonal. */
     const val CHEVRON_SOFT_SLIDE = 28f
 
@@ -554,10 +558,11 @@ object HudOverlayModel {
         if (tbt == null || tbt.turnHidden) return null
         val meters = tbt.guideMeters ?: if (always) Float.MAX_VALUE else return null
         if (meters > CHEVRON_SHOW_M && !always) return null
-        // Approaching a roundabout: no chevrons. They appear only once we are on the ring,
-        // pointing to the exit (right in right-hand traffic). The map's "next street on this
-        // side" check does not apply there: a roundabout is not that turn.
-        val roundaboutExit = tbt.dynamicRoundabout && tbt.rbProgress > 0.02f
+        // Roundabout (owner): never while entering it, only to show the exit, so on the ring
+        // past its first part and within [CHEVRON_ANIM_M] of the exit (no still or "Sempre"
+        // arrow there). They point to the exit (right in right-hand traffic). The map's "next
+        // street on this side" check does not apply: a roundabout is not that turn.
+        val roundaboutExit = tbt.dynamicRoundabout && tbt.rbProgress >= RB_CHEVRON_MIN_PROGRESS && meters <= CHEVRON_ANIM_M
         if (tbt.dynamicRoundabout && !roundaboutExit) return null
         val notOurs = tbt.routeMatched && !tbt.routeClear && !scripted && !roundaboutExit
         if (notOurs && !always) return null
@@ -571,7 +576,9 @@ object HudOverlayModel {
         val sharp = kotlin.math.abs(heading) >= CHEVRON_SHARP_DEG
         val animate = meters <= CHEVRON_ANIM_M && !notOurs
         val intensity = if (animate) (1f - meters / CHEVRON_ANIM_M).coerceIn(0f, 1f) else 0f
-        return Chevrons(side, intensity, animate, sharp)
+        // "Sempre" far away: straight up (the turn is still ahead), leaning to the diagonal as it nears.
+        val l = ((CHEVRON_ALWAYS_UP_M - meters) / (CHEVRON_ALWAYS_UP_M - CHEVRON_SHOW_M)).coerceIn(0f, 1f)
+        return Chevrons(side, intensity, animate, sharp, lean = l * l * (3 - 2 * l))
     }
 
     /**
@@ -747,7 +754,14 @@ object HudOverlayModel {
      * Chevrons pointing to [side] (+1 right, -1 left). [intensity] 0 is the still diagonal,
      * 1 is at the turn. [animate] is false from 100 m to 50 m (one chevron, no pulse).
      */
-    data class Chevrons(val side: Int, val intensity: Float, val animate: Boolean = true, val sharp: Boolean = true)
+    data class Chevrons(
+        val side: Int,
+        val intensity: Float,
+        val animate: Boolean = true,
+        val sharp: Boolean = true,
+        /** The still chevron's pointing: 0 straight up .. 1 the diagonal ("Sempre" far away). */
+        val lean: Float = 1f
+    )
 
     /** Radar alert for the HUD (see RadarManager): metres to the camera, its limit, over it. */
     data class Radar(val distanceM: Int, val limitKmh: Int?, val over: Boolean)
