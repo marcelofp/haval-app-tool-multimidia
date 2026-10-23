@@ -1,5 +1,11 @@
 # Initial OEM interception and loaded-image validation
 
+Subsequent [real Android validation](../../../docs/architecture/carplay-android-validation-2026-10-23.md)
+compiled source9ceda01b on Mini and passed isolated library/ARM64 trampoline tests
+on the car. OEM RX memory was verified read-only. Earlier uncompiled/source-only
+statements below describe the implementation stage; actual cold OEM installation
+and new-module timing remain untested, and no production activation was added.
+
 ## Source status
 
 `cold_oem_interceptor.js` now implements initial Frida replacement of the nine

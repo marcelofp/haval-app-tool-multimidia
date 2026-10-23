@@ -1,5 +1,13 @@
 # CarPlay secondary-video investigation
 
+## Real Android preflight and isolated execution — 2026-10-23
+
+[Android validation](carplay-android-validation-2026-10-23.md) now records actual
+OEM RX hashes (3 segments/13 bodies), successful Mini compile/JVM suite and genuine
+Android ARM64 isolated library/Frida trampoline execution. OEM process untouched,
+installed74127 unchanged, no release/OTA. Full cold OEM interception and app/video
+activation remain pending; an isolated smoke pass is not clean-map support.
+
 ## Cold initial interception and loaded code validation — 2026-10-23
 
 [COLD_INTERCEPTION.md](../../scripts/carplay-native-analysis/native/COLD_INTERCEPTION.md)

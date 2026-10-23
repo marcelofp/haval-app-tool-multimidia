@@ -1,5 +1,15 @@
 # Offline CarPlay native audit
 
+## Android validation — 2026-10-23
+
+Source9ceda01b passed Mini compile/JVM suite and an actual isolated Android ARM64
+library/trampoline smoke. Three OEM RX segments and13 functions verified by bounded
+read-only memory reads, no OEM injection. Details and limits in
+[Android validation](../../docs/architecture/carplay-android-validation-2026-10-23.md).
+`android_isolated_smoke.js` refuses any target except the explicitly identified
+disposable sleep process with no OEM modules; never use it as an OEM loader.
+No production version, APK installation or OTA generated. Native remains excluded.
+
 ## Latest validation — 2026-10-23
 
 Source `1f1a1f7d` passed authorized Mac Mini Java/Kotlin/JNI/ARM64 compilation and
