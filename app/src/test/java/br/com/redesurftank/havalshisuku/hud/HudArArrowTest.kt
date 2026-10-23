@@ -333,26 +333,56 @@ class HudArArrowTest {
     }
 
     @Test
-    fun `chevrons travel from the arc's diagonal to the top edge, turning, growing to 4`() {
-        // Start (50 m): one, just outside the arc's upper-right diagonal, pointing up-right.
-        val (p0, d0, n0) = HudOverlayModel.chevronPose(1, 0f)
-        assertEquals(1, n0)
-        assertEquals(-45f, d0, 0.01f)
-        val diag = HudOverlayModel.arcPoint(HudOverlayModel.CHEVRON_START_DEG_RIGHT, HudOverlayModel.ARC_POWER_R_OUT + HudOverlayModel.CHEVRON_ARC_GAP)
-        assertEquals(diag.first, p0.first, 0.01f)
-        assertEquals(diag.second, p0.second, 0.01f)
-        // At the turn: four, at the top edge out to the side, pointing fully right.
-        val (p1, d1, n1) = HudOverlayModel.chevronPose(1, 1f)
-        assertEquals(4, n1)
-        assertEquals(0f, d1, 0.01f)
-        assertEquals(HudOverlayModel.CHEVRON_END_Y, p1.second, 0.01f)
-        assertEquals(HudOverlayModel.CHEVRON_CX + HudOverlayModel.CHEVRON_END_DX, p1.first, 0.01f)
-        // Left: mirrored, pointing fully left at the end.
-        assertEquals(-135f, HudOverlayModel.chevronPose(-1, 0f).second, 0.01f)
-        assertEquals(-180f, HudOverlayModel.chevronPose(-1, 1f).second, 0.01f)
-        assertTrue(HudOverlayModel.chevronPose(-1, 1f).first.first < HudOverlayModel.CHEVRON_CX)
-        // Growing on the way: 1, 2, 3, 4.
-        assertEquals(listOf(1, 2, 3, 4), listOf(0.1f, 0.3f, 0.6f, 0.9f).map { HudOverlayModel.chevronPose(1, it).third })
+    fun `chevrons - sharp grows on the diagonal then bends to the top edge, soft slides on it`() {
+        val gap = HudOverlayModel.ARC_POWER_R_OUT + HudOverlayModel.CHEVRON_ARC_GAP
+        // Start: one, outside the arc's upper-right diagonal, pointing up-right.
+        val s0 = HudOverlayModel.chevronStrip(1, sharp = true, intensity = 0f)
+        assertEquals(1, s0.size)
+        assertEquals(-45f, s0[0].dir, 0.01f)
+        val start = HudOverlayModel.arcPoint(HudOverlayModel.CHEVRON_SHARP_START_DEG, gap)
+        assertEquals(start.first, s0[0].x, 0.01f)
+        assertEquals(start.second, s0[0].y, 0.01f)
+        // Growing: 1, 2, 3, 4 along the same diagonal, still pointing up-right.
+        assertEquals(listOf(1, 2, 3, 4), listOf(0.05f, 0.15f, 0.27f, 0.35f).map { HudOverlayModel.chevronStrip(1, true, it).size })
+        val grown = HudOverlayModel.chevronStrip(1, true, HudOverlayModel.CHEVRON_GROW)
+        for (k in 1 until grown.size) {
+            assertEquals(-45f, grown[k].dir, 0.01f)
+            assertEquals(grown[k].x - grown[k - 1].x, grown[k - 1].y - grown[k].y, 0.01f) // 45° line
+        }
+        // Sharp, at the turn: a row on the top edge ending out to the side, pointing fully right;
+        // the rear rose more than the lead.
+        val end = HudOverlayModel.chevronStrip(1, true, 1f)
+        assertTrue(end.all { kotlin.math.abs(it.y - HudOverlayModel.CHEVRON_END_Y) < 0.01f && kotlin.math.abs(it.dir) < 0.01f })
+        assertEquals(HudOverlayModel.CHEVRON_CX + HudOverlayModel.CHEVRON_END_DX, end.last().x, 0.01f)
+        assertTrue(grown.first().y - end.first().y > grown.last().y - end.last().y)
+        // Soft: the same diagonal all the way, slid on up it, inside the optics.
+        val softEnd = HudOverlayModel.chevronStrip(1, false, 1f)
+        val softGrown = HudOverlayModel.chevronStrip(1, false, HudOverlayModel.CHEVRON_GROW)
+        assertTrue(softEnd.all { kotlin.math.abs(it.dir + 45f) < 0.01f })
+        assertTrue(softEnd.last().x > softGrown.last().x && softEnd.last().y < softGrown.last().y)
+        assertTrue(softEnd.last().y - HudOverlayModel.CHEVRON_HALF_H * 1.5f >= 40f)
+        assertTrue(grown.last().y - HudOverlayModel.CHEVRON_HALF_H * 1.5f >= 40f)
+        // Left mirrors it.
+        assertEquals(-135f, HudOverlayModel.chevronStrip(-1, true, 0f)[0].dir, 0.01f)
+        assertEquals(-180f, HudOverlayModel.chevronStrip(-1, true, 1f).last().dir, 0.01f)
+        assertTrue(HudOverlayModel.chevronStrip(-1, false, 1f).all { it.x < HudOverlayModel.CHEVRON_CX })
+    }
+
+    @Test
+    fun `chevrons - sharp from 60 degrees, and the always option keeps one still arrow far away`() {
+        val ar = HudOverlayModel.Config(layout = HudOverlayModel.Layout.AR)
+        val d = Directions(active = true, distance = "40 m", distanceM = 40, turn = "TURN_RIGHT")
+        assertTrue(HudOverlayModel.frameFor(ar, d, 0, null, arMetersOverride = 40f).chevrons!!.sharp)
+        assertTrue(!HudOverlayModel.frameFor(ar, d.copy(turn = "SLIGHT_RIGHT"), 0, null, arMetersOverride = 40f).chevrons!!.sharp)
+        val far = d.copy(distance = "800 m", distanceM = 800)
+        assertNull(HudOverlayModel.frameFor(ar, far, 0, null).chevrons)
+        val always = HudOverlayModel.frameFor(ar.copy(chevronsAlways = true), far, 0, null).chevrons!!
+        assertEquals(1, always.side)
+        assertTrue(!always.animate)
+        // Still hidden when stopped, on straight-on steps, and while the turn itself is hidden.
+        assertNull(HudOverlayModel.frameFor(ar.copy(chevronsAlways = true), far, 0, null, speedKmh = 0.0).chevrons)
+        assertNull(HudOverlayModel.frameFor(ar.copy(chevronsAlways = true), far.copy(turn = "STRAIGHT"), 0, null).chevrons)
+        assertNull(HudOverlayModel.frameFor(ar.copy(chevronsAlways = true, showTurnFromM = 500), far, 0, null).chevrons)
     }
 
     @Test

@@ -87,8 +87,6 @@ class RadarAlertEngine {
         const val DIRECTION_MATCH_DEG = 50f
         /** The distance must drop this much between two fixes before a camera alerts ("closing in"). */
         const val CLOSING_M = 2.0
-        /** This far behind the camera = passed. */
-        const val PASSED_M = 15.0
         /** Distance growing this much past its minimum = passed (or turned back). */
         const val PASSED_GROWTH_M = 25.0
         /** Fixes in a row off the camera's road before the target is dropped (turned off). */
@@ -139,8 +137,9 @@ class RadarAlertEngine {
                         along = w.along
                     }
                 }
-                // [by] is from the shifted point: the camera itself is [POSITION_EARLY_M] further.
-                is Where.Behind -> if (w.by > PASSED_M + POSITION_EARLY_M) drop(t, fix) else along = 0.0
+                // Owner: the camera is taken as really [POSITION_EARLY_M] before the database
+                // point, so reaching that point is passing it (the old 0 m could linger past it).
+                is Where.Behind -> drop(t, fix)
                 Where.Off -> {
                     // Parked or crawling, the heading is stale: keep the target as it was.
                     if (isMoving(fix)) t.offFixes++

@@ -134,12 +134,8 @@ class HudOverlayRenderer {
         val phase = if (ch.animate) (nowMs % period.toLong()) / period else 0f
         val appear = 1f
         val base = if (ch.animate) 0.45f + 0.4f * t else 0.9f
-        val (lead, dir, count) = M.chevronPose(ch.side, t)
-        val n = if (ch.animate) count else 1
-        val rad = Math.toRadians(dir.toDouble())
-        val ux = kotlin.math.cos(rad).toFloat()
-        val uy = kotlin.math.sin(rad).toFloat()
-        // A right-pointing chevron round the origin, turned to [dir] for each one.
+        val marks = M.chevronStrip(ch.side, ch.sharp, t)
+        // A right-pointing chevron round the origin, turned to each one's direction.
         chevronPath.reset()
         chevronPath.moveTo(-M.CHEVRON_W, -M.CHEVRON_HALF_H)
         chevronPath.lineTo(-(M.CHEVRON_W - M.CHEVRON_STROKE), -M.CHEVRON_HALF_H)
@@ -148,16 +144,15 @@ class HudOverlayRenderer {
         chevronPath.lineTo(-M.CHEVRON_W, M.CHEVRON_HALF_H)
         chevronPath.lineTo(0f, 0f)
         chevronPath.close()
-        for (k in 0 until n) {
-            // k = 0 trails, k = n-1 is the lead (pulse runs towards it, as before).
-            val back = (n - 1 - k) * M.CHEVRON_SPACING
+        for ((k, mark) in marks.withIndex()) {
+            // k = 0 trails, the last is the lead (pulse runs towards it, as before).
             var d = phase - k.toFloat() / M.CHEVRON_COUNT
             d -= kotlin.math.floor(d)
             val pulse = (1f - d) * (1f - d) * (1f - d)
-            chevronPaint.alpha = (255 * appear * (base + (1f - base) * pulse)).toInt().coerceIn(0, 255)
+            chevronPaint.alpha = (255 * appear * mark.appear * (base + (1f - base) * pulse)).toInt().coerceIn(0, 255)
             canvas.save()
-            canvas.translate(lead.first - ux * back, lead.second - uy * back)
-            canvas.rotate(dir)
+            canvas.translate(mark.x, mark.y)
+            canvas.rotate(mark.dir)
             canvas.drawPath(chevronPath, chevronPaint)
             canvas.restore()
         }

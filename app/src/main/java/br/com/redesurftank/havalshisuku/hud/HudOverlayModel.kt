@@ -466,26 +466,55 @@ object HudOverlayModel {
     const val CHEVRON_END_Y = 48f
     const val CHEVRON_CX = 240f
     const val CHEVRON_END_DX = 150f
-    /** Where they start: just outside the outer arc, on its upper diagonal (canvas degrees). */
+    /** Gap between the outer arc and the chevrons' start. */
     const val CHEVRON_ARC_GAP = 12f
-    const val CHEVRON_START_DEG_RIGHT = 315f
-    const val CHEVRON_START_DEG_LEFT = 225f
+    /** Where the strip starts on the right (canvas degrees round the arcs); the left mirrors it. */
+    const val CHEVRON_SHARP_START_DEG = 330f
+    /** Soft turns start lower, so the strip has room to slide up the diagonal. */
+    const val CHEVRON_SOFT_START_DEG = 345f
+    /** Turns at least this sharp bend the strip to the top edge; softer ones keep the diagonal. */
+    const val CHEVRON_SHARP_DEG = 60f
+    /** Part of the animation (0..1) spent adding chevrons along the diagonal, before they move. */
+    const val CHEVRON_GROW = 0.35f
+    /** Spacing along the diagonal (tighter than the top row's, it is short on room). */
+    const val CHEVRON_DIAG_SPACING = 11f
+    /** How far a soft turn's strip slides up its diagonal. */
+    const val CHEVRON_SOFT_SLIDE = 28f
+
+    /** One chevron: centre, pointing (screen degrees, 0 = right, -90 = up), how faded in it is. */
+    data class ChevronMark(val x: Float, val y: Float, val dir: Float, val appear: Float = 1f)
 
     /**
-     * The lead chevron at [intensity] 0 (the diagonal, from 100 m) .. 1 (the turn): position,
-     * pointing (screen degrees, 0 = right, -90 = up) and how many there are (1..4). Eased, so it
-     * lingers at both ends. The count and the travel run only once the animation has started.
+     * The chevrons at [intensity] 0 (one, still, on the diagonal) .. 1 (the turn), rear first,
+     * lead last (owner, 2026-10-23). First more chevrons grow out along the same diagonal; then
+     * a [sharp] turn's strip moves on in its direction while the rear rises, ending as a
+     * horizontal row on the top edge pointing fully left/right; a soft turn's strip just slides
+     * on along the diagonal, the chevrons staying across it.
      */
-    fun chevronPose(side: Int, intensity: Float): Triple<Pair<Float, Float>, Float, Int> {
+    fun chevronStrip(side: Int, sharp: Boolean, intensity: Float): List<ChevronMark> {
         val t = intensity.coerceIn(0f, 1f)
-        val e = t * t * (3 - 2 * t)
-        val (x0, y0) = arcPoint(if (side > 0) CHEVRON_START_DEG_RIGHT else CHEVRON_START_DEG_LEFT, ARC_POWER_R_OUT + CHEVRON_ARC_GAP)
-        val x1 = CHEVRON_CX + side * CHEVRON_END_DX
-        val x = x0 + (x1 - x0) * e
-        val y = y0 + (CHEVRON_END_Y - y0) * e
-        val dir = if (side > 0) -45f + 45f * e else -135f - 45f * e
-        val n = (1 + (t * CHEVRON_COUNT).toInt()).coerceIn(1, CHEVRON_COUNT)
-        return Triple(x to y, dir, n)
+        val steps = (t / CHEVRON_GROW).coerceAtMost(1f) * (CHEVRON_COUNT - 1)
+        val n = (1 + steps.toInt()).coerceIn(1, CHEVRON_COUNT)
+        // The newest one fades in over the first third of its step.
+        val newest = if (steps < CHEVRON_COUNT - 1) ((steps - (n - 1)) * 3f).coerceIn(0f, 1f) else 1f
+        val m0 = ((t - CHEVRON_GROW) / (1f - CHEVRON_GROW)).coerceIn(0f, 1f)
+        val m = m0 * m0 * (3 - 2 * m0)
+        val deg = if (sharp) CHEVRON_SHARP_START_DEG else CHEVRON_SOFT_START_DEG
+        val (sx, sy) = arcPoint(if (side > 0) deg else 540f - deg, ARC_POWER_R_OUT + CHEVRON_ARC_GAP)
+        val ux = side * 0.70710677f
+        val uy = -0.70710677f
+        val dir0 = if (side > 0) -45f else -135f
+        return List(n) { k ->
+            val dx = sx + ux * k * CHEVRON_DIAG_SPACING
+            val dy = sy + uy * k * CHEVRON_DIAG_SPACING
+            val appear = if (k == n - 1 && n > 1) newest else 1f
+            if (sharp) {
+                val hx = CHEVRON_CX + side * (CHEVRON_END_DX - (CHEVRON_COUNT - 1 - k) * CHEVRON_SPACING)
+                ChevronMark(dx + (hx - dx) * m, dy + (CHEVRON_END_Y - dy) * m, dir0 + side * 45f * m, appear)
+            } else {
+                ChevronMark(dx + ux * CHEVRON_SOFT_SLIDE * m, dy + uy * CHEVRON_SOFT_SLIDE * m, dir0, appear)
+            }
+        }
     }
 
     /**
@@ -517,18 +546,21 @@ object HudOverlayModel {
      * Chevrons for a maneuver within [CHEVRON_SHOW_M], on either HUD layout. Still until
      * [CHEVRON_ANIM_M], then the row animates. With the map matched, only when ours is the next
      * street on the turn's side (a scripted demo ignores that, the maneuver is the script). Hidden while the car is stopped ([speedKmh] <= 0).
+     * [always] (owner option): further away, or where another street comes first, the one still
+     * chevron stays by the arcs pointing to the next road.
      */
-    fun chevronsFor(tbt: Tbt?, speedKmh: Double = 1.0, scripted: Boolean = false): Chevrons? {
+    fun chevronsFor(tbt: Tbt?, speedKmh: Double = 1.0, scripted: Boolean = false, always: Boolean = false): Chevrons? {
         if (speedKmh <= 0.0) return null
-        if (tbt == null) return null
-        val meters = tbt.guideMeters ?: return null
-        if (meters > CHEVRON_SHOW_M) return null
+        if (tbt == null || tbt.turnHidden) return null
+        val meters = tbt.guideMeters ?: if (always) Float.MAX_VALUE else return null
+        if (meters > CHEVRON_SHOW_M && !always) return null
         // Approaching a roundabout: no chevrons. They appear only once we are on the ring,
         // pointing to the exit (right in right-hand traffic). The map's "next street on this
         // side" check does not apply there: a roundabout is not that turn.
         val roundaboutExit = tbt.dynamicRoundabout && tbt.rbProgress > 0.02f
         if (tbt.dynamicRoundabout && !roundaboutExit) return null
-        if (tbt.routeMatched && !tbt.routeClear && !scripted && !roundaboutExit) return null
+        val notOurs = tbt.routeMatched && !tbt.routeClear && !scripted && !roundaboutExit
+        if (notOurs && !always) return null
         val heading = if (tbt.dynamicRoundabout) {
             if (tbt.roundaboutClockwise) -90f else 90f
         } else {
@@ -536,9 +568,10 @@ object HudOverlayModel {
         }
         if (kotlin.math.abs(heading) < CHEVRON_MIN_DEG) return null
         val side = if (heading > 0f) 1 else -1
-        val animate = meters <= CHEVRON_ANIM_M
+        val sharp = kotlin.math.abs(heading) >= CHEVRON_SHARP_DEG
+        val animate = meters <= CHEVRON_ANIM_M && !notOurs
         val intensity = if (animate) (1f - meters / CHEVRON_ANIM_M).coerceIn(0f, 1f) else 0f
-        return Chevrons(side, intensity, animate)
+        return Chevrons(side, intensity, animate, sharp)
     }
 
     /**
@@ -714,7 +747,7 @@ object HudOverlayModel {
      * Chevrons pointing to [side] (+1 right, -1 left). [intensity] 0 is the still diagonal,
      * 1 is at the turn. [animate] is false from 100 m to 50 m (one chevron, no pulse).
      */
-    data class Chevrons(val side: Int, val intensity: Float, val animate: Boolean = true)
+    data class Chevrons(val side: Int, val intensity: Float, val animate: Boolean = true, val sharp: Boolean = true)
 
     /** Radar alert for the HUD (see RadarManager): metres to the camera, its limit, over it. */
     data class Radar(val distanceM: Int, val limitKmh: Int?, val over: Boolean)
@@ -775,6 +808,8 @@ object HudOverlayModel {
         val arGauges: Gauges = Gauges.ARCS,
         /** AR: animated chevrons above the speed when close to a turn. */
         val chevrons: Boolean = true,
+        /** ...and one still chevron by the arcs at any distance, pointing to the next road. */
+        val chevronsAlways: Boolean = false,
         /** AR: arrow in the centre (under the speed) or between the native lane-assist lines. */
         val arPlacement: HudArArrow.Placement = HudArArrow.Placement.CENTER,
         /** AR: real streets round the car from OpenStreetMap, in light grey (beta, off by default). */
@@ -940,7 +975,7 @@ object HudOverlayModel {
             arcs = config.arcs,
             radar = radar,
             wideArcs = wideArcs,
-            chevrons = if (config.chevrons) chevronsFor(tbt, speedKmh, scriptedDemo) else null
+            chevrons = if (config.chevrons) chevronsFor(tbt, speedKmh, scriptedDemo, config.chevronsAlways) else null
         )
     }
 

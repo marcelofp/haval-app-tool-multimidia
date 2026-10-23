@@ -421,6 +421,7 @@ enum class SharedPreferencesKeys(val key: String, val description: String) {
     HUD_NAV_GAUGES("hudNavGauges", "HUD Navegação: indicadores de potência/RPM (none, bars, arcs)"),
     HUD_AR_GAUGES("hudArGauges", "HUD Navegação AR: indicadores de potência/RPM (none, bars, arcs)"),
     HUD_AR_CHEVRONS("hudArChevrons", "HUD Navegação AR: setas animadas acima da velocidade perto da curva"),
+    HUD_AR_CHEVRONS_ALWAYS("hudArChevronsAlways", "HUD: uma seta parada junto aos arcos a qualquer distância, para o lado da próxima rua"),
     HUD_AR_PLACEMENT("hudArPlacement", "HUD Navegação AR: seta no centro (center) ou entre as linhas de faixa (right)"),
     HUD_AR_MAP("hudArMap", "HUD Navegação AR: ruas do OpenStreetMap em cinza (beta)"),
     HUD_AR_MAP_EDGES("hudArMapEdges", "HUD Navegação AR: ruas do mapa só com as bordas (contorno)"),

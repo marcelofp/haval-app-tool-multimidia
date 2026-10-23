@@ -315,13 +315,14 @@ private fun HudNavigationSettingsDialog(
                                     ) { change(config.copy(smallArrowWhenFar = it), PreviewFocus.FAR) }
                                 }
                                 if (layout != HudOverlayModel.Layout.AR) {
-                                    OptionRow(
+                                    ChoiceRow(
                                         "Setas de aproximação",
-                                        "Uma seta na diagonal até 50 m; aí ela anima.",
-                                        config.chevrons,
+                                        "Perto da curva, ou sempre uma junto aos arcos.",
+                                        listOf("Não", "Perto da curva", "Sempre"),
+                                        if (!config.chevrons) 0 else if (config.chevronsAlways) 2 else 1,
                                         enabled = config.navigation,
-                                        info = "A partir de 100 m, uma seta azul na diagonal do lado da curva. De 50 m ela desliza, cresce e pisca. Some com o carro parado."
-                                    ) { change(config.copy(chevrons = it), PreviewFocus.CHEVRONS) }
+                                        info = "Perto da curva: de 100 m uma seta azul na diagonal do lado da curva; de 50 m mais setas surgem nessa diagonal e, em curva fechada, sobem para a borda de cima apontando para o lado; em curva suave (45°) seguem pela diagonal. Sempre: além disso, uma seta parada junto aos arcos a qualquer distância, apontando para o lado da próxima rua. Somem com o carro parado."
+                                    ) { change(config.copy(chevrons = it > 0, chevronsAlways = it == 2), PreviewFocus.CHEVRONS) }
                                 }
                                 OptionRow(
                                     "Distância e tempo restantes",
@@ -362,13 +363,14 @@ private fun HudNavigationSettingsDialog(
                                     enabled = config.navigation && config.mapStreets,
                                     info = "Preenchidas: as ruas em cinza claro. Contorno: só as linhas das bordas das ruas, deixando o HUD mais limpo e a rota azul em destaque."
                                 ) { change(config.copy(mapEdges = it == 1)) }
-                                OptionRow(
+                                ChoiceRow(
                                     "Setas de aproximação",
-                                    "Piscam rumo ao lado da curva, perto dela.",
-                                    config.chevrons,
+                                    "Perto da curva, ou sempre uma junto aos arcos.",
+                                    listOf("Não", "Perto da curva", "Sempre"),
+                                    if (!config.chevrons) 0 else if (config.chevronsAlways) 2 else 1,
                                     enabled = config.navigation,
-                                    info = "De 100 m, uma seta azul na diagonal do lado da curva (com o mapa, só se a sua rua for a próxima desse lado). De 50 m ela desliza, cresce e pisca. Some com o carro parado. O layout Navegação usa a mesma regra."
-                                ) { change(config.copy(chevrons = it), PreviewFocus.CHEVRONS) }
+                                    info = "Perto da curva: de 100 m uma seta azul na diagonal do lado da curva; de 50 m mais setas surgem nessa diagonal e, em curva fechada, sobem para a borda de cima apontando para o lado; em curva suave (45°) seguem pela diagonal. Sempre: além disso, uma seta parada junto aos arcos a qualquer distância, apontando para o lado da próxima rua. Somem com o carro parado."
+                                ) { change(config.copy(chevrons = it > 0, chevronsAlways = it == 2), PreviewFocus.CHEVRONS) }
                             }
                             HudSettingsTab.BARS -> {
                                 // Each layout keeps its own: Navegação bars, Navegação AR arcs by default.

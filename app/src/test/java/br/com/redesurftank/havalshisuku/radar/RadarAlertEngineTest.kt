@@ -80,10 +80,10 @@ class RadarAlertEngineTest {
         assertTrue("approach within 520 m, got ${1_000 - approachAt}", 1_000 - approachAt in 490.0..520.0)
         assertTrue("near within 170 m, got ${1_000 - nearAt}", 1_000 - nearAt in 155.0..170.0)
         assertNull(run.alerts.last().second)
-        // Told 20 m early: 0 m from 20 m before the camera, held until it is passed for real.
-        val zero = run.alerts.filter { it.second?.distanceM == 0 }.map { 1_000 - it.first }
-        assertTrue("0 m only inside the last 20 m, got $zero", zero.isNotEmpty() && zero.max() <= 20.0)
-        assertTrue("held past the camera, got $zero", zero.min() < 0.0)
+        // The camera counts as 20 m before its database point: gone once that point is reached.
+        val inside = run.alerts.filter { 1_000 - it.first < 20.0 }
+        assertTrue(inside.isNotEmpty() && inside.all { it.second == null })
+        assertNotNull(run.alerts.last { 1_000 - it.first >= 20.0 }.second)
         val near = run.alerts.first { it.first == nearAt }.second
         assertNotNull(near)
         assertEquals(Phase.NEAR, near!!.phase)
