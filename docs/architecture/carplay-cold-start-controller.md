@@ -78,3 +78,6 @@ Mac Mini, verifica o Apktool 3.0.2 por SHA-256, valida o baseline e decodifica d
 novo o resultado para provar a presença exata do gate. `assembleDebug` produz
 esse APK em `app/build/outputs/carplay-patches/`, mas ele ainda não substitui o
 asset embarcado. Essa separação permite revisar primeiro o artefato staged.
+Como o APK OEM não contém `resources.arsc`, o build preserva o manifest binário
+original (`--copy-original`) e substitui somente o DEX recompilado antes da nova
+assinatura.

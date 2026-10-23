@@ -60,7 +60,10 @@ verification="$work_dir/verification"
 
 java -jar "$apktool_jar" d -f -o "$decoded" "$base_apk"
 python3 "$(dirname "$0")/patch_cold_start_gate.py" "$decoded"
-java -jar "$apktool_jar" b -o "$unsigned" "$decoded"
+# The OEM APK has no resources.arsc. Apktool cannot relink its decoded manifest
+# against vendor framework attributes, so preserve the authenticated original
+# binary manifest and replace only the rebuilt DEX.
+java -jar "$apktool_jar" b --copy-original -o "$unsigned" "$decoded"
 "$zipalign" -f 4 "$unsigned" "$aligned"
 "$apksigner" sign \
     --ks "$debug_keystore" \
