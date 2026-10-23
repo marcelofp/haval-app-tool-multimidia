@@ -25,6 +25,11 @@ class HudOverlayRenderer {
         const val NATIVE_SPEED_CX = M.NATIVE_SPEED_CX
         /** Chevrons in the Telas previews: a moment with the pulse half way along the row. */
         const val PREVIEW_PULSE_MS = 190L
+        /** Flag pennant in drawFlag's 24 box, next to the pole at x 5. */
+        const val FLAG_L = 5f
+        const val FLAG_T = 3.5f
+        const val FLAG_R = 21f
+        const val FLAG_B = 14f
         /** Map view roads: soft grey under the blue route. */
         const val MAP_ROAD_ALPHA = 215
         /** Edge-line roads: stroke width (half of it stays, outside the road) and its alpha. */
@@ -281,7 +286,8 @@ class HudOverlayRenderer {
         canvas.translate(left, baseline - size)
         canvas.scale(s, s)
         canvas.drawLine(5f, 3f, 5f, 23f, flagPole)
-        canvas.drawPath(flagPath, flagFill)
+        canvas.drawRect(FLAG_L, FLAG_T, FLAG_R, FLAG_B, flagOutline)
+        canvas.drawPath(flagChecks, flagFill)
         canvas.restore()
     }
 
@@ -296,9 +302,19 @@ class HudOverlayRenderer {
         strokeWidth = 2.6f
         strokeCap = Paint.Cap.ROUND
     }
-    // Pennant in the 24 box, notched on the fly side like a checkered-flag outline.
-    private val flagPath = Path().apply {
-        moveTo(5f, 3.5f); lineTo(20f, 3.5f); lineTo(16.5f, 8.5f); lineTo(20f, 13.5f); lineTo(5f, 13.5f); close()
+    private val flagOutline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(217, 255, 255, 255)
+        style = Paint.Style.STROKE
+        strokeWidth = 1.2f
+    }
+    // Pennant in the 24 box (owner): a flat-edged rectangle, chequered like a finish flag
+    // (4 x 3 squares, every other one lit; the outline keeps the dark ones reading as flag).
+    private val flagChecks = Path().apply {
+        val cw = (FLAG_R - FLAG_L) / 4f
+        val ch = (FLAG_B - FLAG_T) / 3f
+        for (r in 0 until 3) for (c in 0 until 4) {
+            if ((r + c) % 2 == 0) addRect(FLAG_L + c * cw, FLAG_T + r * ch, FLAG_L + (c + 1) * cw, FLAG_T + (r + 1) * ch, Path.Direction.CW)
+        }
     }
 
     private val navStreetPaint = android.text.TextPaint(Paint.ANTI_ALIAS_FLAG).apply {

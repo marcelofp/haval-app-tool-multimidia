@@ -237,7 +237,7 @@ private fun HudLayoutCard(
 
 /** Tabs of the Navegação settings dialog. */
 /** The settings dialog's fixed height (fits the 720 px screen between the status bar and the dock). */
-private val DIALOG_HEIGHT = 500.dp
+private val DIALOG_HEIGHT = 468.dp
 
 /** At most four rows per tab, so the dialog stays compact (owner). Mapa is for Navegação AR only. */
 private enum class HudSettingsTab(val title: String) { NAVIGATION("Geral"), ARROW("Mapa"), CHEVRONS("Setas"), BARS("Indicadores") }
@@ -285,7 +285,7 @@ private fun HudNavigationSettingsDialog(
             shape = RoundedCornerShape(16.dp),
             border = BorderStroke(1.5.dp, ImpTokens.Accent)
         ) {
-            Column(modifier = Modifier.fillMaxHeight().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(modifier = Modifier.fillMaxHeight().padding(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         if (layout == HudOverlayModel.Layout.AR) "Layout Navegação AR" else "Layout Navegação",
@@ -539,7 +539,7 @@ private fun OptionRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .clickable(enabled = enabled) { onCheckedChange(!checked) }
-            .padding(vertical = 6.dp)
+            .padding(vertical = 4.dp)
     ) {
         OptionText(title, description, enabled, info, Modifier.weight(1f))
         Switch(
@@ -562,7 +562,7 @@ private fun ChoiceRow(
     info: String? = null,
     onSelect: (Int) -> Unit
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         OptionText(title, description, enabled, info, Modifier.weight(1f))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             options.forEachIndexed { i, label ->

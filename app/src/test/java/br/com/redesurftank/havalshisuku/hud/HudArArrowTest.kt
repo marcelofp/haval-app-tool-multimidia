@@ -333,39 +333,53 @@ class HudArArrowTest {
     }
 
     @Test
-    fun `chevrons - sharp grows on the diagonal then bends to the top edge, soft slides on it`() {
-        val gap = HudOverlayModel.ARC_POWER_R_OUT + HudOverlayModel.CHEVRON_ARC_GAP
-        // Start: one, outside the arc's upper-right diagonal, pointing up-right.
-        val s0 = HudOverlayModel.chevronStrip(1, sharp = true, intensity = 0f)
+    fun `chevrons - the lead travels alone, then a trail grows behind it, four in a row by 10 m`() {
+        fun at(m: Float, sharp: Boolean = true, side: Int = 1) =
+            HudOverlayModel.chevronStrip(side, sharp, 1f - m / HudOverlayModel.CHEVRON_ANIM_M)
+        // 50 m: one, outside the arc's upper-right diagonal, pointing up-right.
+        val s0 = at(50f)
         assertEquals(1, s0.size)
-        assertEquals(-45f, s0[0].dir, 0.01f)
-        val start = HudOverlayModel.arcPoint(HudOverlayModel.CHEVRON_SHARP_START_DEG, gap)
+        val start = HudOverlayModel.arcPoint(HudOverlayModel.CHEVRON_SHARP_START_DEG, HudOverlayModel.ARC_POWER_R_OUT + HudOverlayModel.CHEVRON_ARC_GAP)
         assertEquals(start.first, s0[0].x, 0.01f)
         assertEquals(start.second, s0[0].y, 0.01f)
-        // Growing: 1, 2, 3, 4 along the same diagonal, still pointing up-right.
-        assertEquals(listOf(1, 2, 3, 4), listOf(0.05f, 0.15f, 0.27f, 0.35f).map { HudOverlayModel.chevronStrip(1, true, it).size })
-        val grown = HudOverlayModel.chevronStrip(1, true, HudOverlayModel.CHEVRON_GROW)
-        for (k in 1 until grown.size) {
-            assertEquals(-45f, grown[k].dir, 0.01f)
-            assertEquals(grown[k].x - grown[k - 1].x, grown[k - 1].y - grown[k].y, 0.01f) // 45° line
+        assertEquals(-45f, s0[0].dir, 2f)
+        // First 30 m alone: it climbs and turns towards level.
+        val s35 = at(35f)
+        assertEquals(1, s35.size)
+        assertTrue(s35[0].y < start.second && s35[0].dir > -45f && s35[0].dir < 0f)
+        val s20 = at(20f)
+        assertEquals(1, s20.size)
+        assertEquals(HudOverlayModel.CHEVRON_END_Y, s20[0].y, 0.5f)
+        assertEquals(0f, s20[0].dir, 0.5f)
+        // Then the trail grows behind it, fading to the last one.
+        assertEquals(listOf(1, 2, 3, 4), listOf(19.5f, 16f, 12.5f, 10f).map { at(it).size })
+        val s15 = at(15f)
+        assertTrue(s15.first().appear < s15.last().appear)
+        // By 10 m: four, level, in a row on the top edge; at the turn the lead is out to the side.
+        val s10 = at(10f)
+        assertEquals(4, s10.size)
+        assertTrue(s10.all { kotlin.math.abs(it.y - HudOverlayModel.CHEVRON_END_Y) < 0.01f && kotlin.math.abs(it.dir) < 0.01f })
+        for (k in 1 until 4) assertEquals(HudOverlayModel.CHEVRON_SPACING, s10[k].x - s10[k - 1].x, 0.5f)
+        val end = at(0f)
+        assertEquals(4, end.size)
+        assertTrue(end.last().x > s10.last().x && end.last().x > 380f)
+        // Inside the optics all the way.
+        for (m in listOf(50f, 40f, 30f, 20f, 10f, 0f)) for (sharp in listOf(true, false)) for (side in listOf(1, -1)) {
+            assertTrue(at(m, sharp, side).all {
+                // A chevron's half-height once turned to its direction.
+                val rad = Math.toRadians(it.dir.toDouble())
+                val half = HudOverlayModel.CHEVRON_HALF_H * (kotlin.math.abs(kotlin.math.sin(rad)) + kotlin.math.abs(kotlin.math.cos(rad))).toFloat()
+                it.y - half >= 40f && it.x in 20f..460f
+            })
         }
-        // Sharp, at the turn: a row on the top edge ending out to the side, pointing fully right;
-        // the rear rose more than the lead.
-        val end = HudOverlayModel.chevronStrip(1, true, 1f)
-        assertTrue(end.all { kotlin.math.abs(it.y - HudOverlayModel.CHEVRON_END_Y) < 0.01f && kotlin.math.abs(it.dir) < 0.01f })
-        assertEquals(HudOverlayModel.CHEVRON_CX + HudOverlayModel.CHEVRON_END_DX, end.last().x, 0.01f)
-        assertTrue(grown.first().y - end.first().y > grown.last().y - end.last().y)
-        // Soft: the same diagonal all the way, slid on up it, inside the optics.
-        val softEnd = HudOverlayModel.chevronStrip(1, false, 1f)
-        val softGrown = HudOverlayModel.chevronStrip(1, false, HudOverlayModel.CHEVRON_GROW)
-        assertTrue(softEnd.all { kotlin.math.abs(it.dir + 45f) < 0.01f })
-        assertTrue(softEnd.last().x > softGrown.last().x && softEnd.last().y < softGrown.last().y)
-        assertTrue(softEnd.last().y - HudOverlayModel.CHEVRON_HALF_H * 1.5f >= 40f)
-        assertTrue(grown.last().y - HudOverlayModel.CHEVRON_HALF_H * 1.5f >= 40f)
+        // Soft: the diagonal all the way, the trail on it too.
+        val soft = at(0f, sharp = false)
+        assertEquals(4, soft.size)
+        assertTrue(soft.all { kotlin.math.abs(it.dir + 45f) < 0.01f })
+        assertTrue(soft.last().x > at(50f, sharp = false)[0].x)
         // Left mirrors it.
-        assertEquals(-135f, HudOverlayModel.chevronStrip(-1, true, 0f)[0].dir, 0.01f)
-        assertEquals(-180f, HudOverlayModel.chevronStrip(-1, true, 1f).last().dir, 0.01f)
-        assertTrue(HudOverlayModel.chevronStrip(-1, false, 1f).all { it.x < HudOverlayModel.CHEVRON_CX })
+        assertEquals(180f, kotlin.math.abs(at(0f, side = -1).last().dir), 0.5f)
+        assertTrue(at(0f, side = -1).all { it.x < HudOverlayModel.ARC_CX })
     }
 
     @Test
@@ -397,7 +411,7 @@ class HudArArrowTest {
         val strip = HudOverlayModel.chevronStrip(1, true, 0f)[0]
         assertEquals(strip.x, near.x, 0.01f)
         assertEquals(strip.y, near.y, 0.01f)
-        assertEquals(strip.dir, near.dir, 0.01f)
+        assertEquals(strip.dir, near.dir, 2f)
         assertTrue(HudOverlayModel.chevronCompass(-1, false, 0.5f).x < HudOverlayModel.ARC_CX)
         assertTrue(top.y - HudOverlayModel.CHEVRON_STROKE >= 40f)
     }

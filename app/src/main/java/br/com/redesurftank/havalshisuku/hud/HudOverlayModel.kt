@@ -474,16 +474,19 @@ object HudOverlayModel {
     const val CHEVRON_SOFT_START_DEG = 345f
     /** Turns at least this sharp bend the strip to the top edge; softer ones keep the diagonal. */
     const val CHEVRON_SHARP_DEG = 60f
-    /** Part of the animation (0..1) spent adding chevrons along the diagonal, before they move. */
-    const val CHEVRON_GROW = 0.35f
-    /** Spacing along the diagonal (tighter than the top row's, it is short on room). */
-    const val CHEVRON_DIAG_SPACING = 11f
+    /** From here to the turn the trail grows behind the lead; before it the lead travels alone. */
+    const val CHEVRON_TRAIL_M = 20f
+    /** From here all four lie in the row (the lead is far enough along the top edge). */
+    const val CHEVRON_ALIGNED_M = 10f
+    /** Sharp turn: how far past the curve's corner the lead comes out level, then its run along the top edge. */
+    const val CHEVRON_CURVE_EXIT = 10f
+    const val CHEVRON_TOP_RUN = 75f
+    /** Soft turn: the length of its diagonal. */
+    const val CHEVRON_SOFT_LEN = 61f
     /** "Sempre": the still chevron points straight up from this far, leaning to the diagonal by [CHEVRON_SHOW_M]. */
     const val CHEVRON_ALWAYS_UP_M = 300f
     /** On a roundabout's ring: only this far round it (never while entering, owner 2026-10-23). */
     const val RB_CHEVRON_MIN_PROGRESS = 0.3f
-    /** How far a soft turn's strip slides up its diagonal. */
-    const val CHEVRON_SOFT_SLIDE = 28f
 
     /** One chevron: centre, pointing (screen degrees, 0 = right, -90 = up), how faded in it is. */
     data class ChevronMark(val x: Float, val y: Float, val dir: Float, val appear: Float = 1f)
@@ -504,35 +507,93 @@ object HudOverlayModel {
     }
 
     /**
-     * The chevrons at [intensity] 0 (one, still, on the diagonal) .. 1 (the turn), rear first,
-     * lead last (owner, 2026-10-23). First more chevrons grow out along the same diagonal; then
-     * a [sharp] turn's strip moves on in its direction while the rear rises, ending as a
-     * horizontal row on the top edge pointing fully left/right; a soft turn's strip just slides
-     * on along the diagonal, the chevrons staying across it.
+     * The lead chevron's way, as x,y points: a sharp turn curves from the diagonal start up to
+     * the top row (tangent -45 deg there, level at the end), then runs along the top edge; a
+     * soft turn is the straight diagonal.
+     */
+    private fun chevronWay(side: Int, sharp: Boolean): FloatArray {
+        val deg = if (sharp) CHEVRON_SHARP_START_DEG else CHEVRON_SOFT_START_DEG
+        val (x0, y0) = arcPoint(if (side > 0) deg else 540f - deg, ARC_POWER_R_OUT + CHEVRON_ARC_GAP)
+        if (!sharp) {
+            val d = CHEVRON_SOFT_LEN * 0.70710677f
+            return floatArrayOf(x0, y0, x0 + side * d, y0 - d)
+        }
+        // Quadratic curve P0 -> P1 with its corner where the start's diagonal meets the top row.
+        val rise = y0 - CHEVRON_END_Y
+        val cx = x0 + side * rise
+        val x1 = cx + side * CHEVRON_CURVE_EXIT
+        val n = 24
+        val pts = FloatArray((n + 2) * 2)
+        for (i in 0..n) {
+            val u = i / n.toFloat()
+            val a = (1 - u) * (1 - u)
+            val b = 2 * u * (1 - u)
+            val c = u * u
+            pts[2 * i] = a * x0 + b * cx + c * x1
+            pts[2 * i + 1] = a * y0 + b * CHEVRON_END_Y + c * CHEVRON_END_Y
+        }
+        pts[2 * n + 2] = x1 + side * CHEVRON_TOP_RUN
+        pts[2 * n + 3] = CHEVRON_END_Y
+        return pts
+    }
+
+    /** Point and heading (screen degrees) [at] along [way] (clamped to its ends). */
+    private fun alongWay(way: FloatArray, at: Float): Triple<Float, Float, Float> {
+        var left = at.coerceAtLeast(0f)
+        val last = way.size / 2 - 1
+        for (i in 0 until last) {
+            val dx = way[2 * i + 2] - way[2 * i]
+            val dy = way[2 * i + 3] - way[2 * i + 1]
+            val len = kotlin.math.hypot(dx, dy)
+            if (left <= len || i == last - 1) {
+                val f = if (len > 0f) (left / len).coerceIn(0f, 1f) else 0f
+                val dir = Math.toDegrees(kotlin.math.atan2(dy, dx).toDouble()).toFloat()
+                return Triple(way[2 * i] + dx * f, way[2 * i + 1] + dy * f, dir)
+            }
+            left -= len
+        }
+        return Triple(way[0], way[1], 0f)
+    }
+
+    private fun wayLength(way: FloatArray, upTo: Int = way.size / 2 - 1): Float {
+        var len = 0f
+        for (i in 0 until upTo) len += kotlin.math.hypot(way[2 * i + 2] - way[2 * i], way[2 * i + 3] - way[2 * i + 1])
+        return len
+    }
+
+    /**
+     * The chevrons at [intensity] 0 (50 m, one still on the diagonal) .. 1 (the turn), rear
+     * first, lead last (owner, 2026-10-23). Over the first 30 m the lead travels alone: a sharp
+     * turn's curves up to the top row, turning until it points fully left/right; a soft one's
+     * runs up its diagonal. Over the last [CHEVRON_TRAIL_M] the lead keeps going (along the top
+     * edge for a sharp turn) and a trail grows behind it, on its own way and fading to the last
+     * one, so it is not lined up while still on the curve; by [CHEVRON_ALIGNED_M] all four lie
+     * in the row.
      */
     fun chevronStrip(side: Int, sharp: Boolean, intensity: Float): List<ChevronMark> {
-        val t = intensity.coerceIn(0f, 1f)
-        val steps = (t / CHEVRON_GROW).coerceAtMost(1f) * (CHEVRON_COUNT - 1)
-        val n = (1 + steps.toInt()).coerceIn(1, CHEVRON_COUNT)
-        // The newest one fades in over the first third of its step.
-        val newest = if (steps < CHEVRON_COUNT - 1) ((steps - (n - 1)) * 3f).coerceIn(0f, 1f) else 1f
-        val m0 = ((t - CHEVRON_GROW) / (1f - CHEVRON_GROW)).coerceIn(0f, 1f)
-        val m = m0 * m0 * (3 - 2 * m0)
-        val deg = if (sharp) CHEVRON_SHARP_START_DEG else CHEVRON_SOFT_START_DEG
-        val (sx, sy) = arcPoint(if (side > 0) deg else 540f - deg, ARC_POWER_R_OUT + CHEVRON_ARC_GAP)
-        val ux = side * 0.70710677f
-        val uy = -0.70710677f
-        val dir0 = if (side > 0) -45f else -135f
-        return List(n) { k ->
-            val dx = sx + ux * k * CHEVRON_DIAG_SPACING
-            val dy = sy + uy * k * CHEVRON_DIAG_SPACING
-            val appear = if (k == n - 1 && n > 1) newest else 1f
-            if (sharp) {
-                val hx = CHEVRON_CX + side * (CHEVRON_END_DX - (CHEVRON_COUNT - 1 - k) * CHEVRON_SPACING)
-                ChevronMark(dx + (hx - dx) * m, dy + (CHEVRON_END_Y - dy) * m, dir0 + side * 45f * m, appear)
-            } else {
-                ChevronMark(dx + ux * CHEVRON_SOFT_SLIDE * m, dy + uy * CHEVRON_SOFT_SLIDE * m, dir0, appear)
-            }
+        val meters = CHEVRON_ANIM_M * (1f - intensity.coerceIn(0f, 1f))
+        val way = chevronWay(side, sharp)
+        val total = wayLength(way)
+        // Where the lone travel ends: the curve's end (sharp), or most of the diagonal (soft).
+        val alone = if (sharp) wayLength(way, way.size / 2 - 2) else total - 3 * CHEVRON_SPACING
+        val lead = if (meters >= CHEVRON_TRAIL_M) {
+            val u = (CHEVRON_ANIM_M - meters) / (CHEVRON_ANIM_M - CHEVRON_TRAIL_M)
+            alone * u * u * (3 - 2 * u)
+        } else {
+            // Ease-out, so the row is out on the top edge (aligned) by CHEVRON_ALIGNED_M.
+            val u = 1f - meters / CHEVRON_TRAIL_M
+            alone + (total - alone) * (1f - (1f - u) * (1f - u))
+        }
+        // Trail: grows 1 -> 4 from CHEVRON_TRAIL_M to CHEVRON_ALIGNED_M, never behind the start.
+        val grown = ((CHEVRON_TRAIL_M - meters) / (CHEVRON_TRAIL_M - CHEVRON_ALIGNED_M)).coerceIn(0f, 1f) * (CHEVRON_COUNT - 1)
+        val behind = minOf(grown.toInt(), (lead / CHEVRON_SPACING).toInt(), CHEVRON_COUNT - 1)
+        val newest = if (behind == grown.toInt() && grown < CHEVRON_COUNT - 1) ((grown - behind) * 3f).coerceIn(0f, 1f) else 1f
+        return List(behind + 1) { i ->
+            val k = behind - i // 0 = lead
+            val (x, y, dir) = alongWay(way, lead - k * CHEVRON_SPACING)
+            // The trail fades to its last chevron; the newest one fades in.
+            val fade = 1f - 0.22f * k
+            ChevronMark(x, y, dir, if (k == behind && k > 0) fade * newest else fade)
         }
     }
 
