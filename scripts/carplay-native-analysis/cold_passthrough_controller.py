@@ -385,8 +385,12 @@ class ColdPassthroughController:
                 raise ControllerError("PID-specialized launcher hash mismatch")
             print("[cold] launcher specialized", file=sys.stderr, flush=True)
 
+            persistent_interceptor = (
+                f"tail -f /dev/null | {REMOTE_INJECTOR} --device=local -i "
+                f"-p {self.pid} -s {REMOTE_LAUNCHER}"
+            )
             command = (
-                f"nohup setsid {REMOTE_INJECTOR} --device=local -p {self.pid} -s {REMOTE_LAUNCHER} "
+                f"nohup setsid sh -c {shell_quote(persistent_interceptor)} "
                 f"> {REMOTE_LOG} 2>&1 < /dev/null & :"
             )
             self.remote.run(command)
@@ -401,8 +405,12 @@ class ColdPassthroughController:
             phase, log = self._wait_phase({"installed-pinned", "failed", "failed-pinned"}, time.monotonic() + 8.0)
             if phase != "installed-pinned":
                 raise ControllerError(f"Cold interceptor did not install passthrough (phase={phase}): {log[-1200:]}")
+            persistent_endpoint = (
+                f"tail -f /dev/null | {REMOTE_INJECTOR} --device=local -i "
+                f"-p {self.pid} -s {REMOTE_ENDPOINT_LAUNCHER}"
+            )
             self.remote.run(
-                f"nohup setsid {REMOTE_INJECTOR} --device=local -p {self.pid} -s {REMOTE_ENDPOINT_LAUNCHER} "
+                f"nohup setsid sh -c {shell_quote(persistent_endpoint)} "
                 f"> {REMOTE_ENDPOINT_LOG} 2>&1 < /dev/null & :"
             )
             print("[cold] endpoint launched", file=sys.stderr, flush=True)
