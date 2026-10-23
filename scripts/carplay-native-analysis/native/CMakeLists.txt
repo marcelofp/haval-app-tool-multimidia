@@ -10,6 +10,7 @@ add_library(carplay_video_bridge SHARED
     packet_conversion.cpp
     avc_configuration.cpp
     android_secondary_decoder.cpp
+    oem_ingress.cpp
 )
 target_compile_features(carplay_video_bridge PUBLIC cxx_std_17)
 target_compile_options(carplay_video_bridge PRIVATE -Wall -Wextra -Werror)

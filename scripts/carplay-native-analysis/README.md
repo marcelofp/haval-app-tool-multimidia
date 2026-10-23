@@ -132,8 +132,56 @@ from the APK, and the C++ runtime is linked statically. This validates compilati
 without adding a loadable runtime dependency or restricting existing APK ABIs.
 All Android builds go through the audited Mac Mini queue, never the coordinator.
 
-Not implemented: the pre-creation OEM interception/loader, Surface transfer,
-clock calibration, secondary-display advertisement, watchdog/visibility ownership
-or a user-facing toggle. C++ methods are not exception-safe C trampolines; a future
-adapter needs ABI-boundary handling and verified per-stream ordering. Removing
-the APK exclusion alone is not a safe deployment procedure.
+Not implemented: actual OEM interception/loader installation, Surface transfer,
+runtime clock calibration, secondary-display advertisement, watchdog/visibility
+ownership or a user-facing toggle. Removing the APK exclusion alone is not a safe
+deployment procedure.
+
+## Pre-creation ingress and bounded observer
+
+`native/oem_ingress.{h,cpp}` adds exception-contained C trampolines around the
+observed seven-slot ABI and StartSession(session, UUID, type, context). A bounded
+thread-local scope carries an owned identity across synchronous Initialize;
+cross-thread or missing scopes reject secondary setup. Disabled mode forwards
+without interpreting UUIDs. The captured CFL string API uses 32-bit lengths,
+not the conventional 64-bit CFIndex. Host tests exercise nested scopes, exception
+unwinding, malformed strings and independent retirement under ASan/UBSan and TSan.
+
+Registration is one-shot and intentionally process-lifetime pinned: the module
+and its original OEM targets must remain loaded. Supply real unmodified targets
+or interception trampolines, never already-patched entry points. There is no
+unload/rebind protocol. Callback quiescence remains an external requirement.
+The C bootstrap installs only passthrough state; it does not patch OEM callbacks,
+load the module, create a Surface or enable the secondary decoder.
+
+`probe_profile.py` creates an offline profile from three exact hash-pinned private
+ARM64 libraries. `oem_ingress_probe.js` is inert until an explicit RPC start with
+that reviewed profile and fresh file-hash attestations. It verifies mapped build
+identities and code signatures before installing five observation hooks. It logs
+pseudonymous stream/session sequences, UUID hashes and sampled raw 64-bit ticks;
+it never copies image payloads. Defaults: 60 seconds/1,000 records; hard limits:
+five minutes/3,000 records, bounded stream and scope maps. Stop detaches its hooks.
+Finalize records entry, not completed resource release or callback quiescence.
+
+Interceptor.attach temporarily instruments native code and adds callback overhead;
+this is not zero-impact observation. First actual use requires a parked controlled
+test. No automatic Frida deployment, SELinux change or vehicle operation is added.
+Node VM tests validate observer logic, not compatibility with target Frida runtime.
+
+Static decompilation of the captured CoreUtils UpTicks shows CLOCK_MONOTONIC in
+nanoseconds. AirPlay's frame path uses UpTicks or synchronized NTP-to-UpTicks;
+this is not the navigation ETA field. Runtime clock validation is still required;
+the Android decoder continues to demand an explicit converter rather than guessing.
+
+Validation commands in addition to the native bridge tests:
+
+```sh
+node --check scripts/carplay-native-analysis/oem_ingress_probe.js
+node scripts/carplay-native-analysis/test_probe.js "$PRIVATE_PROFILE"
+CARPLAY_NATIVE_DIR="$PRIVATE_CAPTURE_DIRECTORY" \
+CARPLAY_PACKET_CONVERTER=/tmp/carplay-packet-converter /tmp/carplay-native-analysis-venv/bin/python \
+  -m unittest discover -s scripts/carplay-native-analysis -v
+```
+
+The expanded Python suite has 14 tests with both optional private inputs supplied.
+Neither these tests nor compilation proves a negotiated secondary CarPlay map.
