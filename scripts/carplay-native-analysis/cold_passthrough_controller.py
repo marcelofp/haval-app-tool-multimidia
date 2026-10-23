@@ -294,9 +294,13 @@ class ColdPassthroughController:
             f"rm -f {shell_quote(REMOTE_LOG)} {shell_quote(REMOTE_ENDPOINT_LOG)} "
             f"{shell_quote(CONTROL_ROOT)}/release.*"
         )
+        print("[cold] uploading bridge", file=sys.stderr, flush=True)
         self.remote.upload(bridge, REMOTE_BRIDGE, "500")
+        print("[cold] uploading launcher", file=sys.stderr, flush=True)
         self.remote.upload(template, REMOTE_LAUNCHER, "600")
+        print("[cold] uploading endpoint", file=sys.stderr, flush=True)
         self.remote.upload(endpoint_script, REMOTE_ENDPOINT_LAUNCHER, "600")
+        print("[cold] staging verified", file=sys.stderr, flush=True)
         return {
             "bridgeSize": len(bridge),
             "bridgeSha256": bridge_sha,
@@ -337,7 +341,9 @@ class ColdPassthroughController:
         return classify_injector_log(last_log), last_log
 
     def run(self) -> dict[str, str | int]:
+        print("[cold] preflight", file=sys.stderr, flush=True)
         before = self.preflight()
+        print("[cold] staging", file=sys.stderr, flush=True)
         staged = self.stage()
         self.nonce = secrets.token_hex(16)
         release_file = ""
@@ -347,11 +353,14 @@ class ColdPassthroughController:
                 f"setprop {GATE_PROPERTY} {self.nonce}; "
                 f"test \"$(getprop {GATE_PROPERTY})\" = {self.nonce}"
             )
+            print("[cold] gate armed", file=sys.stderr, flush=True)
             old_pid = before.get("pid", "")
             for value in re.findall(r"\d+", old_pid):
                 self.remote.run(f"kill -15 {value} 2>/dev/null || true", check=False)
+            print("[cold] old host terminated", file=sys.stderr, flush=True)
             deadline = time.monotonic() + 8.0
             self.pid = self._wait_new_pid(old_pid, deadline)
+            print(f"[cold] fresh host pid={self.pid}", file=sys.stderr, flush=True)
             maps_status = self.remote.run(
                 f"printf 'maps_loaded='; if grep -qi -e libairplay_ts -e libcarplaystack "
                 f"-e libcoreutils_ts /proc/{self.pid}/maps; then echo yes; else echo no; fi",
@@ -360,6 +369,7 @@ class ColdPassthroughController:
             loaded = re.findall(r"(?m)^maps_loaded=(yes|no)$", maps_status)
             if not loaded or loaded[-1] != "no":
                 raise ControllerError("OEM libraries loaded before injector arming; refusing warm interception")
+            print("[cold] cold maps verified", file=sys.stderr, flush=True)
 
             bridge, interceptor, profile, _ = self.inputs.read()
             exact = launcher_for_pid(interceptor, profile, self.pid, len(bridge), sha256_bytes(bridge)).encode()
@@ -373,25 +383,29 @@ class ColdPassthroughController:
             ).strip().splitlines()[-1]
             if observed != sha256_bytes(exact):
                 raise ControllerError("PID-specialized launcher hash mismatch")
+            print("[cold] launcher specialized", file=sys.stderr, flush=True)
 
             command = (
                 f"setsid {REMOTE_INJECTOR} --device=local -p {self.pid} -s {REMOTE_LAUNCHER} "
-                f"> {REMOTE_LOG} 2>&1 < /dev/null &"
+                f"> {REMOTE_LOG} 2>&1 < /dev/null & :"
             )
             self.remote.run(command)
+            print("[cold] interceptor launched", file=sys.stderr, flush=True)
             phase, log = self._wait_phase({"armed", "failed", "failed-pinned"}, deadline)
             if phase != "armed":
                 raise ControllerError(f"Cold interceptor did not arm (phase={phase}): {log[-1200:]}")
 
             release_file = f"{CONTROL_ROOT}/release.{self.pid}.{self.nonce}"
             self.remote.run(f"umask 077; : > {shell_quote(release_file)}")
+            print("[cold] startup released", file=sys.stderr, flush=True)
             phase, log = self._wait_phase({"installed-pinned", "failed", "failed-pinned"}, time.monotonic() + 8.0)
             if phase != "installed-pinned":
                 raise ControllerError(f"Cold interceptor did not install passthrough (phase={phase}): {log[-1200:]}")
             self.remote.run(
                 f"setsid {REMOTE_INJECTOR} --device=local -p {self.pid} -s {REMOTE_ENDPOINT_LAUNCHER} "
-                f"> {REMOTE_ENDPOINT_LOG} 2>&1 < /dev/null &"
+                f"> {REMOTE_ENDPOINT_LOG} 2>&1 < /dev/null & :"
             )
+            print("[cold] endpoint launched", file=sys.stderr, flush=True)
             endpoint_deadline = time.monotonic() + 8.0
             endpoint_log = ""
             while time.monotonic() < endpoint_deadline:
