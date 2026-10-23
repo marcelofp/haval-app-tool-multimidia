@@ -13,6 +13,10 @@ add_library(carplay_video_bridge SHARED
     oem_ingress.cpp
     decoder_lease.cpp
     android_surface_transport.cpp
+    secondary_advertisement.cpp
+    secondary_session.cpp
+    secondary_runtime.cpp
+    oem_runtime_adapter.cpp
 )
 target_compile_features(carplay_video_bridge PUBLIC cxx_std_17)
 target_compile_options(carplay_video_bridge PRIVATE -Wall -Wextra -Werror)

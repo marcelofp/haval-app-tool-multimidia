@@ -11,15 +11,20 @@ public:
     ~DecoderLease();
     std::unique_ptr<SecondaryDecoder> claim();
     void revoke() noexcept;
+    bool active() const;
+    bool withActive(const std::function<void()>& operation);
 
 private:
+    friend class SecondarySession;
     class Client;
+    bool bindSession();
     void retireLocked() noexcept;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     Factory factory_;
     std::unique_ptr<SecondaryDecoder> decoder_;
     bool claimed_ = false;
     bool revoked_ = false;
+    bool sessionBound_ = false;
 };
 
 }

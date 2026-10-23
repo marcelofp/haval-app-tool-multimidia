@@ -12,7 +12,7 @@ namespace {
 using Window = std::shared_ptr<ANativeWindow>;
 struct SurfaceRecord {
     Window window;
-    std::shared_ptr<DecoderLease> lease;
+    SurfaceSessionBinding binding;
 };
 std::mutex registryMutex;
 std::unordered_map<std::int64_t, SurfaceRecord> registry;
@@ -27,7 +27,7 @@ std::int64_t importSurface(JNIEnv* environment, jobject surface) {
     std::lock_guard<std::mutex> lock(registryMutex);
     if (registry.size() >= 8 || nextHandle == std::numeric_limits<std::int64_t>::max()) { return 0; }
     const auto handle = nextHandle++;
-    registry.emplace(handle, SurfaceRecord{std::move(window), nullptr});
+    registry.emplace(handle, SurfaceRecord{std::move(window), {}});
     return handle;
 }
 
@@ -40,7 +40,21 @@ void revokeSurface(std::int64_t handle) {
         retired = std::move(iterator->second);
         registry.erase(iterator);
     }
-    if (retired.lease) { retired.lease->revoke(); }
+    if (retired.binding.session) { retired.binding.session->close(); }
+}
+
+bool matchesWindowGeometry(std::int64_t handle, std::uint32_t width, std::uint32_t height) {
+    Window window;
+    {
+        std::lock_guard<std::mutex> lock(registryMutex);
+        const auto iterator = registry.find(handle);
+        if (iterator == registry.end()) { return false; }
+        window = iterator->second.window;
+    }
+    const auto actualWidth = ANativeWindow_getWidth(window.get());
+    const auto actualHeight = ANativeWindow_getHeight(window.get());
+    return actualWidth > 0 && actualHeight > 0 &&
+        static_cast<std::uint32_t>(actualWidth) == width && static_cast<std::uint32_t>(actualHeight) == height;
 }
 }
 
@@ -49,14 +63,53 @@ VideoBridge::DecoderFactory surfaceDecoderFactory(
     if (!converter) { return {}; }
     std::lock_guard<std::mutex> lock(registryMutex);
     const auto iterator = registry.find(handle);
-    if (iterator == registry.end() || iterator->second.lease) { return {}; }
+    if (iterator == registry.end() || iterator->second.binding.session) { return {}; }
     const auto window = iterator->second.window;
     auto lease = std::make_shared<DecoderLease>([window, converter = std::move(converter)] {
         return std::make_unique<AndroidSecondaryDecoder>(window.get(), converter);
     });
+    auto session = std::make_shared<SecondarySession>(true);
+    const auto generation = session->arm(lease);
+    if (!generation) { return {}; }
     VideoBridge::DecoderFactory factory = [lease](const StreamIdentity&) { return lease->claim(); };
-    iterator->second.lease = std::move(lease);
+    iterator->second.binding = {std::move(session), generation};
     return factory;
+}
+
+bool surfaceRouteReady(std::int64_t handle) {
+    const auto binding = surfaceSessionBinding(handle);
+    return binding.session && binding.session->active(binding.generation);
+}
+
+SurfaceSessionBinding surfaceSessionBinding(std::int64_t handle) {
+    std::lock_guard<std::mutex> lock(registryMutex);
+    const auto iterator = registry.find(handle);
+    return iterator == registry.end() ? SurfaceSessionBinding{} : iterator->second.binding;
+}
+
+std::unique_ptr<SecondaryRuntime> runtimeForSurface(std::int64_t handle,
+    AndroidSecondaryDecoder::TickConverter converter, observed_abi::VideoCallbacks original,
+    OriginalStartSession originalSession, SecondaryRuntimeConfig config, UuidReader uuidReader,
+    DisplayAdvertisementApi displayApi, std::shared_ptr<void> lifetime) {
+    if (!config.enabled) {
+        return std::make_unique<SecondaryRuntime>(original, originalSession, std::move(config),
+            VideoBridge::DecoderFactory{}, std::move(uuidReader));
+    }
+    if (!lifetime || !matchesWindowGeometry(handle, config.display.widthPixels, config.display.heightPixels)) {
+        return nullptr;
+    }
+    auto factory = surfaceDecoderFactory(handle, std::move(converter));
+    if (!factory) { return nullptr; }
+    const auto binding = surfaceSessionBinding(handle);
+    if (!binding.session) { return nullptr; }
+    try {
+        return std::make_unique<SecondaryRuntime>(original, originalSession, std::move(config),
+            std::move(factory), std::move(uuidReader), binding.session, binding.generation,
+            std::move(displayApi), std::move(lifetime));
+    } catch (...) {
+        binding.session->revoke(binding.generation);
+        throw;
+    }
 }
 
 }

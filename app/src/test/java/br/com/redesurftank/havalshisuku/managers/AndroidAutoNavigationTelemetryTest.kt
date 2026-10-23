@@ -156,4 +156,62 @@ class AndroidAutoNavigationTelemetryTest {
         val json = publisher.onUpdate(first.copy(exitNumber = 2), 10L)
         assertTrue(json!!.contains("\"exit_number\":2"))
     }
+
+    @Test
+    fun zeroedExitKeepsCompleteApproachAcrossRoadRename() {
+        val acc = AndroidAutoNavigationTelemetry.Accumulator()
+        acc.onRouteStep("Approach", AndroidAutoNavigationTelemetry.MANEUVER_ROUNDABOUT_ENTER_AND_EXIT_CCW_WITH_ANGLE,
+            true, angle = 315, number = 6)
+        val exit = acc.onRouteStep("Exit road", AndroidAutoNavigationTelemetry.MANEUVER_ROUNDABOUT_EXIT_CCW, true)
+        assertEquals(6, exit.exitNumber)
+        assertEquals(315, exit.turnAngle)
+        assertEquals(false, exit.roundaboutClockwise)
+        val repeated = acc.onNextTurn("Exit road", AndroidAutoNavigationTelemetry.MANEUVER_ROUNDABOUT_EXIT_CCW, 0)
+        assertEquals(6, repeated.exitNumber)
+        assertEquals(315, repeated.turnAngle)
+    }
+
+    @Test
+    fun zeroedExitDoesNotInheritAcrossResetOrNonRoundabout() {
+        for (boundary in listOf("reset", "straight", "route_end", "inactive")) {
+            val acc = AndroidAutoNavigationTelemetry.Accumulator()
+            acc.onRouteStep("A", AndroidAutoNavigationTelemetry.MANEUVER_ROUNDABOUT_ENTER_AND_EXIT_CCW_WITH_ANGLE,
+                true, angle = 180, number = 3)
+            when (boundary) {
+                "reset" -> acc.reset()
+                "straight" -> acc.onRouteStep("B", AndroidAutoNavigationTelemetry.MANEUVER_STRAIGHT, true)
+                "route_end" -> acc.onRouteStep(null, 0, false)
+                "inactive" -> acc.onNavigationState(AndroidAutoNavigationTelemetry.NAV_STATUS_INACTIVE)
+            }
+            val exit = acc.onRouteStep("C", AndroidAutoNavigationTelemetry.MANEUVER_ROUNDABOUT_EXIT_CCW, true)
+            assertNull(exit.exitNumber)
+            assertNull(exit.turnAngle)
+        }
+    }
+
+    @Test
+    fun newEntryAndOppositeDirectionClearOldPair() {
+        for (event in listOf(AndroidAutoNavigationTelemetry.MANEUVER_ROUNDABOUT_ENTER_CCW,
+            AndroidAutoNavigationTelemetry.MANEUVER_ROUNDABOUT_EXIT_CW)) {
+            val acc = AndroidAutoNavigationTelemetry.Accumulator()
+            acc.onRouteStep("A", AndroidAutoNavigationTelemetry.MANEUVER_ROUNDABOUT_ENTER_AND_EXIT_CCW_WITH_ANGLE,
+                true, angle = 180, number = 3)
+            val next = acc.onRouteStep("B", event, true)
+            assertNull(next.exitNumber)
+            assertNull(next.turnAngle)
+        }
+    }
+
+    @Test
+    fun partialOrMalformedExitNeverCombinesWithOldPair() {
+        for ((number, angle) in listOf(2 to 0, 0 to 90, 999 to 9999)) {
+            val acc = AndroidAutoNavigationTelemetry.Accumulator()
+            acc.onRouteStep("A", AndroidAutoNavigationTelemetry.MANEUVER_ROUNDABOUT_ENTER_AND_EXIT_CCW_WITH_ANGLE,
+                true, angle = 315, number = 6)
+            val next = acc.onRouteStep("B", AndroidAutoNavigationTelemetry.MANEUVER_ROUNDABOUT_EXIT_CCW,
+                true, angle = angle, number = number)
+            assertEquals(number.takeIf { it in 1..20 }, next.exitNumber)
+            assertEquals(angle.takeIf { it != 0 && it in -360..360 }, next.turnAngle)
+        }
+    }
 }

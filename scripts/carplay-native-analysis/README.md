@@ -241,3 +241,281 @@ Source `7e707bc` passed Java compilation, ARM64 CMake/link and assembleDebug on 
 authorized Mini in 1m55s. Both JNI exports were verified in the linked ELF; the
 endpoint class appears in Debug DEX, manifest stays unchanged and native library
 remains excluded. This validates compilation/packaging, not Android execution.
+
+## Secondary advertisement preparation, not installed
+
+`secondary_advertisement.{h,cpp}` now prepares a separate display array through
+explicit injected copy/release/append APIs. It never mutates or releases the
+borrowed original array. Default-off returns that original without calling any
+API. Enabled preparation requires distinct principal/secondary identities with
+the captured types 110/111, an exact decoded CFL UUID match, explicit bounded
+pixel/physical dimensions and FPS, and a readiness callback before and after
+append. Missing physical measurements fail closed rather than being invented.
+
+The append signature matches the captured eleven-argument AltScreen API. The
+copy callback must return an owned mutable array retaining its elements; the
+append callback must preserve ownership of that array, or explicitly transfer
+ownership of a replacement. Optional night-mode/limited-UI/URL fields are left
+absent; no semantics are inferred for them. Failed preparation releases only
+owned candidates and returns the untouched original. PreparedDisplays is movable
+but not copyable; takePrepared transfers only an owned prepared array. A future
+hook must separately handle its original function's return ownership correctly.
+
+`surfaceRouteReady(handle)` checks a registered, non-revoked decoder lease without
+holding the registry lock during lease inspection. It proves route availability,
+not a rendered frame, independent BufferQueue or iPhone negotiation. Two readiness
+checks alone do not make advertisement/revocation atomic: the SecondarySession
+coordinator below must guard publication and reject stale generations. No hook/bootstrap
+binds these callbacks, and no secondary advertisement is actually sent.
+
+Host validation:
+
+```sh
+g++ -std=c++17 -Wall -Wextra -Werror -pthread -fsanitize=address,undefined \
+  -fno-omit-frame-pointer -g scripts/carplay-native-analysis/native/secondary_advertisement.cpp \
+  scripts/carplay-native-analysis/native/secondary_advertisement_test.cpp \
+  -o /tmp/carplay-secondary-advertisement-test
+timeout 20 /tmp/carplay-secondary-advertisement-test
+```
+
+Tests use synthetic arrays/API functions, not captured OEM execution. They cover
+default-off, original preservation, ownership transfer, alias/null copy rejection,
+identity/geometry validation, append error/exception/replacement rollback and
+readiness lost during preparation. Updated lease tests cover active-state checks.
+These changes have not been compiled for Android: the user requested no new
+version/build until the combined changes are ready. No Gradle/NDK job was submitted.
+
+## Generation-scoped secondary session
+
+`secondary_session.{h,cpp}` now coordinates lease ownership, copied-array
+preparation, publication and retirement. It defaults disabled. Explicit arming
+consumes a fresh exclusive lease binding and returns a nonzero monotonic generation;
+stale generations cannot publish, revoke a newer lease or reopen a closed session.
+The ordinary API allows one initial publication per generation. The getter-only
+path described below can repeat the immutable announcement without a new decoder.
+
+Preparation happens outside the session lock. The final commit validates the
+generation/state and calls a noexcept ownership-transfer publisher while holding
+both the session lock and DecoderLease.withActive guard. Even direct client/backend
+lease retirement cannot interleave that commit. Revocation invalidates the session
+before stopping the decoder outside the session mutex; repeat close/revoke calls
+wait for retirement to finish. Other sessions use independent locks/resources.
+
+The publisher must only hand off the owned array, return promptly and never reenter
+the session, lease, codec, or OEM callbacks. Decoder factories/backends must not
+reenter the coordinator under the lease lock. The host must keep config, borrowed
+original array, CFL UUID and OEM functions alive through preparation, and keep the
+coordinator alive until all callers finish. Committing an array does not mean the
+iPhone accepted it; close cannot retract an array already handed to OEM/phone.
+Old stream addresses still require the ingress quiescence/lifetime protocol.
+
+The native Surface registry now owns a session/generation binding after explicit
+factory creation. surfaceSessionBinding returns a retained snapshot for the future
+OEM adapter. JNI revoke removes the handle first and closes that session outside
+the registry lock. surfaceRouteReady reports an active route both before and after
+publication; ready separately means an advertisement may still be prepared.
+No runtime loader/hook calls advertise and no feature is enabled in the car.
+
+Host tests (fake arrays, fake decoder and publication callback):
+
+```sh
+g++ -std=c++17 -Wall -Wextra -Werror -pthread -fsanitize=address,undefined \
+  -fno-omit-frame-pointer -g scripts/carplay-native-analysis/native/decoder_lease.cpp \
+  scripts/carplay-native-analysis/native/secondary_advertisement.cpp \
+  scripts/carplay-native-analysis/native/secondary_session.cpp \
+  scripts/carplay-native-analysis/native/secondary_session_test.cpp \
+  -o /tmp/carplay-secondary-session-test
+timeout 25 /tmp/carplay-secondary-session-test
+```
+
+Repeat with -fsanitize=thread. Tests exercise default-off/exclusive binding,
+single publication, stale generation/rearm, close/revoke during preparation,
+publication versus direct lease retirement, duplicate close waiting for codec
+retirement, backend failure and independent session progress. No Android build,
+version bump, signing, OTA or vehicle test is performed for this source-only step.
+
+## Fresh cluster consumer source, not activated
+
+`CarPlaySecondarySurfaceConsumer` is a Debug/leanDebug-only TextureView with no
+manifest entry or call site. It starts hidden and requires an explicit enable,
+an authenticated Binder/token/generation, main-thread lifecycle, attachment to
+display 3 and hardware acceleration. It rejects existing or externally supplied
+SurfaceTextures and creates its producer Surface from its own new callback
+texture. It never reads/replaces the principal CarPlay Surface or creates/moves
+an Activity/Presentation. The future host still owns cluster visibility, AA
+priority and permission to attach this experimental view.
+
+Grant/revoke Binder calls run on a serial worker, not the UI thread. onReady
+means only grant acceptance with measured view dimensions, not a decoded frame,
+an advertised display, iPhone acceptance or clean-map content. A size change ends
+the one-shot consumer rather than resizing a live codec. No raw pixels are read.
+
+On texture destruction the view retains release ownership until the producer has
+acknowledged revoke, or the Binder peer is known dead. Surface and SurfaceTexture
+release are ordered by CarPlayConsumerRetirement: producer stopped first, texture
+detached before texture release. Release actions run outside the state monitor,
+with a single drain owner to preserve ordering without holding it across GPU calls.
+The host must close AND detach/remove its view;
+close alone may await framework destruction. onStopped is emitted only after
+retirement plus texture release (or when nothing was ever granted).
+
+If revoke is unconfirmed, one consumer is quarantined with its resources retained;
+a process-local singleton gate prevents accumulating new sessions/queues. There
+is no automatic retry loop. Explicit retryRetirement or peer death can complete
+cleanup. A hung synchronous Binder call cannot be cancelled by this class; it
+blocks only that worker and keeps the gate held. This conservative bounded hold
+needs real-device validation, including decoder stop after consumer detachment.
+Session tokens are cleared after confirmed retirement and never logged.
+
+Four JUnit tests in src/testDebug cover retirement ordering in either direction,
+idempotence, concurrent stop/detach and failed-release retry. They are written but
+NOT executed: no Java/Android compilation or APK build was requested in this batch.
+Native host session/lease/advertisement regressions were rerun successfully, but
+do not validate the new Java view, Binder or GPU lifecycle. No loader calls start.
+
+The delayed texture release follows the
+[SurfaceTextureListener ownership contract](https://developer.android.com/reference/android/view/TextureView.SurfaceTextureListener#onSurfaceTextureDestroyed(android.graphics.SurfaceTexture));
+the view follows the [TextureView API](https://developer.android.com/reference/android/view/TextureView).
+Combined Mac Mini compilation/unit tests and parked lifecycle testing remain gates.
+
+## Experimental host and AA-priority guards, source only
+
+`CarPlaySecondaryClusterHost` now owns a consumer in an explicitly supplied empty
+FrameLayout slot already attached to display 3. It does not create a Presentation,
+change an existing layout, remove another child, alter resolution or touch the
+main CarPlay Activity. No application call site creates the host. A future display
+owner must provide a genuinely exclusive slot and the authenticated endpoint.
+
+Start, pre-draw, grant acknowledgement, explicit onInputsChanged and a bounded
+250-ms active-only poll check authorization. An immutable observed snapshot must
+be at most 1,000 ms old and affirm opt-in, exclusive slot ownership, AA known
+inactive, native CarPlay on main, no safety overlay and no conflicting app. Missing,
+future, stale or wrong-display evidence denies. Both snapshots and clock reads
+must use elapsedRealtime, including deep sleep, not uptimeMillis; old permits
+must not remain fresh through vehicle sleep. See
+[Android clock semantics](https://developer.android.com/reference/android/os/SystemClock#elapsedRealtime()).
+
+The host additionally reads AA session/request/Surface state and the existing
+CarPlay orchestrator state; it never starts/stops their monitors, disables AA,
+changes focus or launches/moves native apps. The SnapshotProvider must be a fast
+nonblocking read of authoritative cached telemetry, not shell/Binder work on the
+UI thread. An uninitialized cached AA STOPPED is NOT evidence for known inactivity.
+
+Loss of permission closes and detaches only this consumer and removes all host
+callbacks. onHidden means its view was removed; onRetired separately means queue
+retirement completed. Quarantined resources can outlive hiding and retain their
+view/context until recovery, bounded to the consumer singleton. No automatic
+resume/retry occurs. The source guards are not a global atomic display arbiter;
+the real owner must feed immediate AA/native-safety changes and coordinate with
+projection ownership. Polling/pre-draw alone cannot prove zero overlap on hardware.
+
+Three src/testDebug JUnit methods cover every permission field, stale/future/sleep
+timestamps and wrong displays. Like the four retirement tests, these are written
+but not compiled/executed. Host/consumer source awaits combined Mini validation
+and parked device tests. Production source/manifest/AA behavior remain untouched.
+
+## Integrated native runtime, synthetic end-to-end only
+
+`secondary_runtime.{h,cpp}` connects OemIngress, the secondary factory and the
+generation coordinator. Default-off forwards OEM without UUID reads, secondary
+creation or advertisement. Enabled construction requires matching bridge/display
+identities, a ready generation, display APIs and an owned lifetime token. The
+trusted future loader must ensure that token really retains the CFL UUID/modules
+and that original targets match the captured binary; nonnull is not attestation.
+
+Each generation binds only one runtime. Secondary StartSession AND factory creation
+are gated on a committed advertisement, while the principal remains independent.
+A decoder wrapper rejects dimensions differing from the advertisement. Close
+revokes only the captured generation and this ingress's secondary, without closing
+newer generations or changing principal routing.
+
+`runtimeForSurface` prepares the runtime using an imported Surface, explicit clock
+converter and caller-supplied identity/APIs/lifetime. Actual native window geometry
+must match before consuming the one-shot factory. Failed construction revokes its
+captured generation. Disabled construction never accesses the Surface registry.
+Android adapter changes remain uncompiled. No new enabled JNI/C bootstrap or hook
+installs this runtime; the existing C bootstrap stays passthrough-only.
+
+The source C boundary below contains C++ exceptions; actual installation must still
+pin callback/module/UUID lifetimes through quiescence. Publisher remains non-reentrant,
+noexcept and an ownership-only handoff. Close cannot withdraw a committed array.
+
+Portable integration validation:
+
+```sh
+g++ -std=c++17 -Wall -Wextra -Werror -pthread -fsanitize=address,undefined \
+  -fno-omit-frame-pointer -g scripts/carplay-native-analysis/native/packet_conversion.cpp \
+  scripts/carplay-native-analysis/native/avc_configuration.cpp \
+  scripts/carplay-native-analysis/native/video_bridge.cpp \
+  scripts/carplay-native-analysis/native/oem_ingress.cpp \
+  scripts/carplay-native-analysis/native/decoder_lease.cpp \
+  scripts/carplay-native-analysis/native/secondary_advertisement.cpp \
+  scripts/carplay-native-analysis/native/secondary_session.cpp \
+  scripts/carplay-native-analysis/native/secondary_runtime.cpp \
+  scripts/carplay-native-analysis/native/secondary_runtime_test.cpp \
+  -o /tmp/carplay-secondary-runtime-test
+timeout 25 /tmp/carplay-secondary-runtime-test
+```
+
+Repeat with -fsanitize=thread. Six synthetic scenarios cover passthrough,
+advertisement/creation/frame isolation, duplicate/mismatched binding, stale close,
+geometry mismatch and primary progress while secondary submit/close blocks. These
+use fake OEM callbacks/arrays/decoder, not actual Surface/AMediaCodec or decoded
+map content. No new build/version/signing/OTA/vehicle operation in this source step.
+
+## OEM C boundary, getter ownership and warm principal adoption
+
+`oem_runtime_adapter.{h,cpp}` adds noexcept C entry points for the seven callbacks,
+StartSession, display getter, close and diagnostics. C++ exceptions are caught and
+retire the secondary; they never deliberately restart/stop principal OEM services.
+This cannot catch invalid pointers, native signals or violations of a noexcept
+release callback. The library remains excluded and no native hook is installed.
+
+The getter uses the observed DisplayArray(Status*) shape. Enabled construction
+requires an explicit owned-return contract and a trusted nonthrowing release API.
+On successful replacement it releases the getter's original owned reference once
+and transfers the prepared copy to the original caller. Failure retains the exact
+original pointer/status; original error/null returns pass through without an append.
+Null status pointers are rejected at the boundary. The real hook point's ownership
+contract must still be verified before enabling this assumption on hardware.
+
+Repeated or concurrent getter calls prepare independent owned copies from each
+fresh principal array. A private runtime/coordinator path permits repeating the
+same immutable configuration under the same generation/lease guard. No new decoder
+or runtime binding is created. The ordinary publication API remains single-use.
+Close before commit falls back to the original response. A response committed
+before concurrent close can still return afterward; close cannot retract it, but
+secondary creation/frame delivery remains gated by the revoked lease.
+
+Ingress and runtime adapters share one atomic process registration reservation;
+neither can overwrite or chain onto the other. Registration does not patch code.
+The chosen adapter stays process-pinned with its original targets; there is no
+uninstall/rebind API. A future installer must use real unmodified targets/trampolines,
+prepare all state before changing callbacks and provide quiescent rollback.
+
+Warm installation needs particular care: an enabled bridge cannot identify a
+principal stream created before its Initialize interception. Explicit
+adoptPrincipal validates principal type/UUID and binds the supplied existing stream
+without invoking OEM Initialize or creating a decoder. Secondary identity, null
+and duplicate bindings reject. The future loader must prove that this is a live
+principal with fresh capture, retained UUID, valid stream epoch and quiesced
+callbacks BEFORE switching hooks. Do not infer the first stream or reuse a pointer
+from logs. No capture/installer automates that proof or adoption in the vehicle.
+
+Portable adapter validation uses synthetic callbacks, refcounted-by-test arrays
+and fake decoders, not actual CoreUtils/OEM execution:
+
+```sh
+g++ -std=c++17 -Wall -Wextra -Werror -pthread -fsanitize=address,undefined \
+  -fno-omit-frame-pointer -g scripts/carplay-native-analysis/native/{packet_conversion,avc_configuration,video_bridge,oem_ingress,decoder_lease,secondary_advertisement,secondary_session,secondary_runtime,oem_runtime_adapter,oem_runtime_adapter_test}.cpp \
+  -o /tmp/carplay-oem-runtime-test
+for mode in off enabled legacy race adopt close-getter; do
+  timeout 25 /tmp/carplay-oem-runtime-test "$mode" || exit
+done
+```
+
+Repeat with -fsanitize=thread. Modes cover disabled passthrough, exception containment,
+original error/null/ownership behavior, parallel repeated queries without duplicate
+decoders, both registration orders/races, warm adoption without reinitialization,
+and close during getter preparation returning the original response. No new
+Android compilation, version, signing, OTA or vehicle operation performed.

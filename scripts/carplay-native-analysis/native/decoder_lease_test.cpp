@@ -50,11 +50,14 @@ std::shared_ptr<DecoderLease> makeLease(const std::shared_ptr<State>& state) {
 int main() {
     auto state = std::make_shared<State>();
     auto lease = makeLease(state);
+    assert(lease->active());
     auto client = lease->claim();
+    assert(lease->active());
     assert(client && !lease->claim());
     assert(client->configure(640, 480, {}));
     assert(client->submit({1}, 1));
     lease->revoke();
+    assert(!lease->active());
     lease->revoke();
     assert(!client->submit({1}, 2) && !client->configure(640, 480, {}));
     client.reset();
@@ -80,11 +83,13 @@ int main() {
 
     auto empty = std::make_shared<DecoderLease>([] { return std::unique_ptr<SecondaryDecoder>{}; });
     assert(!empty->claim() && !empty->claim());
+    assert(!empty->active());
     auto exceptional = std::make_shared<DecoderLease>([]() -> std::unique_ptr<SecondaryDecoder> {
         throw std::runtime_error("synthetic factory failure");
     });
     try { exceptional->claim(); assert(false); } catch (const std::runtime_error&) {}
     assert(!exceptional->claim());
+    assert(!exceptional->active());
     auto early = makeLease(std::make_shared<State>());
     early->revoke();
     assert(!early->claim());

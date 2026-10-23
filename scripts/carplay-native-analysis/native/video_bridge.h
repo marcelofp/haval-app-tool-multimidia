@@ -55,6 +55,7 @@ public:
     VideoBridge& operator=(const VideoBridge&) = delete;
 
     Status initialize(Stream stream, const StreamIdentity* identityBeforeCreation);
+    Status adoptPrincipal(Stream stream, const StreamIdentity& identity);
     void finalize(Stream stream);
     Status setWidthHeight(Stream stream, std::uint32_t width, std::uint32_t height);
     Status setAVCC(Stream stream, const std::uint8_t* bytes, std::size_t length);

@@ -4,13 +4,54 @@
 
 ### Independent Surface and advertisement follow-up
 
+The source OEM adapter now wraps the getter and video/session C boundary, with
+exception containment, explicit owned-array replacement and repeated immutable
+announcements. Legacy ingress/runtime share a process-only registration gate.
+An explicit warm-principal adoption path binds a verified live stream without
+calling OEM Initialize; this addresses a bridge installed after native CarPlay is
+already on D0. Fresh live identity/epoch proof and quiescent hook installation
+remain unimplemented. No code guesses stream identity or installs hooks itself.
+Six synthetic adapter modes passed ASan/UBSan/TSan, including concurrent getters,
+ownership rollback, warm adoption and close during preparation. No hardware result.
+
+SecondaryRuntime now integrates the portable ingress/factory/advertisement path,
+requiring matching identities, an exclusive session generation and committed
+advertisement before secondary creation. The decoder enforces advertised geometry;
+old-generation close cannot affect a newer session or principal. Six synthetic
+end-to-end host scenarios passed ASan/UBSan and TSan, including primary progress
+through a blocked secondary shutdown. This is not OEM/Surface/codec execution.
+The Android Surface adapter checks native dimensions before runtime preparation,
+but has not been compiled/used in this batch. Enabled C bootstrap, actual getter
+installation, real getter ownership verification, module attestation and app entry
+remain unimplemented; the new C/ownership adapter itself exists only as source.
+
+The next source-only step adds a default-off copied-array advertisement builder
+and live Surface route readiness inspection. It calls an injected captured-ABI
+AltScreen entry only after explicit identity/geometry/readiness validation, and
+returns the borrowed principal array on failure. Synthetic ownership/rollback
+tests passed; no runtime hook sends this array and no new Android build was run.
+SecondarySession now implements source-level advertisement/revoke generation
+serialization through a shared lease guard at ownership handoff; direct readiness
+checks alone remain insufficient. This coordinator is not installed in OEM.
+User requested one combined release
+later; keep current version, production packages and OTA unchanged.
+
 A Debug-only explicit Binder endpoint and native Surface registry now provide the
 transport boundary, without registering a service or loading a library. Single
 grants require exact UID/session token and remote owner death monitoring. Portable
 DecoderLease tests cover immediate secondary retirement and concurrent isolation;
 no real Binder/JNI/AMediaCodec execution is claimed. Queue independence must come
 from a newly created consumer, not pointer inequality or copying the OEM Surface.
-The runtime loader and cluster consumer are still missing.
+A fresh Debug-only cluster TextureView consumer now exists as source, initially
+hidden and explicitly started only on an attached accelerated display 3. It uses
+its own texture, serial worker IPC and acknowledged retirement; unconfirmed revoke
+retains one bounded quarantine slot rather than releasing a potentially live queue.
+A Debug-only dedicated-slot host now connects it without a production entry point
+or Presentation. Fresh elapsedRealtime authorization and read-only AA/native
+CarPlay guards gate entry and close on loss of eligibility. Seven retirement/policy
+JUnit methods and all new Java remain uncompiled/unexecuted. Real display ownership,
+safety/AA event integration and authenticated runtime loader are still missing;
+the source checks are not a globally atomic display arbitration mechanism.
 
 REA/Ghidra follow-up on the exact captured AirPlay hash confirms
 AirPlayInfoArrayAddAltScreenDisplay at ELF 0x33d70 passes stream type 0x6f (111)

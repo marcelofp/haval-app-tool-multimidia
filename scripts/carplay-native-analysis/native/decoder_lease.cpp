@@ -76,4 +76,23 @@ void DecoderLease::revoke() noexcept {
     retireLocked();
 }
 
+bool DecoderLease::active() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return !revoked_ && (factory_ || decoder_);
+}
+
+bool DecoderLease::withActive(const std::function<void()>& operation) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!operation || revoked_ || (!factory_ && !decoder_)) { return false; }
+    operation();
+    return true;
+}
+
+bool DecoderLease::bindSession() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (sessionBound_ || revoked_ || (!factory_ && !decoder_)) { return false; }
+    sessionBound_ = true;
+    return true;
+}
+
 }

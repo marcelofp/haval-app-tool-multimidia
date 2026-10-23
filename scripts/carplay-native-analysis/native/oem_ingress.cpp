@@ -12,6 +12,7 @@ namespace {
 struct CreationScope;
 thread_local CreationScope* currentScope = nullptr;
 std::atomic<OemIngress*> activeIngress{nullptr};
+std::atomic<bool> processBridgeClaimed{false};
 std::atomic<std::uint64_t> boundaryFaults{0};
 
 struct CreationScope {
@@ -102,6 +103,14 @@ observed_abi::Status OemIngress::initialize(observed_abi::Stream stream) {
     return bridge_.initialize(stream, identity);
 }
 
+observed_abi::Status OemIngress::adoptPrincipal(observed_abi::Stream stream, std::uint32_t type,
+                                              observed_abi::String uuid) {
+    if (!enabled_ || type != principal_.type) { return VideoBridge::rejected; }
+    const auto copied = reader_(uuid);
+    if (!copied || *copied != principal_.uuid) { return VideoBridge::rejected; }
+    return bridge_.adoptPrincipal(stream, {type, *copied});
+}
+
 observed_abi::Status OemIngress::start(observed_abi::Stream stream, std::uint32_t type,
                                       observed_abi::String uuid) {
     if (!enabled_) {
@@ -114,15 +123,14 @@ observed_abi::Status OemIngress::start(observed_abi::Stream stream, std::uint32_
 VideoBridge& OemIngress::video() { return bridge_; }
 
 bool pinIngressForProcess(std::unique_ptr<OemIngress> ingress) {
-    if (!ingress) {
-        return false;
-    }
-    OemIngress* expected = nullptr;
-    if (!activeIngress.compare_exchange_strong(expected, ingress.get())) {
-        return false;
-    }
-    ingress.release();
+    if (!ingress || !detail::claimProcessBridge()) { return false; }
+    activeIngress.store(ingress.release());
     return true;
+}
+
+bool detail::claimProcessBridge() noexcept {
+    bool expected = false;
+    return processBridgeClaimed.compare_exchange_strong(expected, true);
 }
 
 static OemIngress* ingress() { return activeIngress.load(); }

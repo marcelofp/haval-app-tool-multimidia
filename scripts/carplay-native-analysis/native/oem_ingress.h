@@ -20,6 +20,7 @@ public:
     observed_abi::Status startSession(void* session, observed_abi::String uuid,
                                      std::uint32_t type, void* context);
     observed_abi::Status initialize(observed_abi::Stream stream);
+    observed_abi::Status adoptPrincipal(observed_abi::Stream stream, std::uint32_t type, observed_abi::String uuid);
     observed_abi::Status start(observed_abi::Stream stream, std::uint32_t type, observed_abi::String uuid);
     VideoBridge& video();
 
@@ -33,6 +34,9 @@ private:
 };
 
 bool pinIngressForProcess(std::unique_ptr<OemIngress> ingress);
+namespace detail {
+bool claimProcessBridge() noexcept;
+}
 observed_abi::VideoCallbacks ingressCallbacks();
 
 }

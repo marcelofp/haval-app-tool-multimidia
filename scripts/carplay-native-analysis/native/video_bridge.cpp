@@ -84,6 +84,20 @@ VideoBridge::Status VideoBridge::initialize(Stream stream, const StreamIdentity*
     return 0;
 }
 
+VideoBridge::Status VideoBridge::adoptPrincipal(Stream stream, const StreamIdentity& identity) {
+    if (!config_.enabled || !stream || !matches(identity, config_.principal)) { return rejected; }
+    auto record = std::make_shared<Record>();
+    record->secondary = false;
+    record->identity = identity;
+    std::lock_guard<std::mutex> lock(recordsMutex_);
+    if (records_.size() >= config_.maximumStreams || records_.count(stream)) { return rejected; }
+    for (const auto& entry : records_) {
+        if (matches(entry.second->identity, identity)) { return rejected; }
+    }
+    records_.emplace(stream, std::move(record));
+    return 0;
+}
+
 void VideoBridge::retire(Record& record) {
     if (!record.retired) {
         record.retired = true;
