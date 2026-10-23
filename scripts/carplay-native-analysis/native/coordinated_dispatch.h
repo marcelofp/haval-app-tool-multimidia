@@ -10,6 +10,17 @@ struct DispatchTargets {
     OriginalGetDisplays displays = nullptr;
 };
 
+class DispatchObservation {
+public:
+    virtual ~DispatchObservation() = default;
+    virtual observed_abi::Status session(void* session, observed_abi::String uuid, std::uint32_t type,
+        const std::function<observed_abi::Status()>& invoke) = 0;
+    virtual void starting(observed_abi::Stream stream, std::uint32_t type, observed_abi::String uuid) noexcept = 0;
+    virtual void started(observed_abi::Status status, observed_abi::Stream stream,
+        std::uint32_t type, observed_abi::String uuid) noexcept = 0;
+    virtual void retiring(observed_abi::Stream stream) noexcept = 0;
+};
+
 class CoordinatedDispatch final {
     struct State;
     class Invocation;
@@ -28,7 +39,7 @@ public:
         bool replaced_ = false;
     };
 
-    explicit CoordinatedDispatch(DispatchTargets originals);
+    explicit CoordinatedDispatch(DispatchTargets originals, std::shared_ptr<DispatchObservation> observation = {});
     std::unique_ptr<Freeze> tryFreeze();
     observed_abi::Status initialize(observed_abi::Stream stream);
     void finalize(observed_abi::Stream stream);
@@ -40,6 +51,7 @@ public:
         std::uint64_t ticks, observed_abi::Dictionary options, observed_abi::Completion completion, void* context);
     observed_abi::Status session(void* session, observed_abi::String uuid, std::uint32_t type, void* context);
     DisplayArray displays(observed_abi::Status* error);
+    void sessionBoundary(const std::function<void()>& apply);
 
 private:
     const std::shared_ptr<State> state_;

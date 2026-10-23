@@ -15,10 +15,12 @@ bool complete(const DispatchTargets& targets) noexcept {
 }
 
 struct CoordinatedDispatch::State {
-    explicit State(DispatchTargets initial) : targets(initial) {}
+    State(DispatchTargets initial, std::shared_ptr<DispatchObservation> observer)
+        : targets(initial), observation(std::move(observer)) {}
     std::mutex mutex;
     std::condition_variable resumed;
     DispatchTargets targets;
+    const std::shared_ptr<DispatchObservation> observation;
     std::size_t active = 0;
     bool frozen = false;
     std::thread::id freezer;
@@ -33,6 +35,7 @@ public:
         }
         state_->resumed.wait(lock, [this] { return !state_->frozen; });
         targets = state_->targets;
+        observation = state_->observation;
         ++state_->active;
     }
     ~Invocation() {
@@ -40,12 +43,13 @@ public:
         --state_->active;
     }
     DispatchTargets targets{};
+    std::shared_ptr<DispatchObservation> observation;
 private:
     const std::shared_ptr<State> state_;
 };
 
-CoordinatedDispatch::CoordinatedDispatch(DispatchTargets originals)
-    : state_(std::make_shared<State>(originals)) {
+CoordinatedDispatch::CoordinatedDispatch(DispatchTargets originals, std::shared_ptr<DispatchObservation> observation)
+    : state_(std::make_shared<State>(originals, std::move(observation))) {
     if (!complete(originals)) { throw std::invalid_argument("All nine original dispatch targets required"); }
 }
 
@@ -89,17 +93,25 @@ observed_abi::Status CoordinatedDispatch::initialize(observed_abi::Stream stream
     Invocation call(state_); return call.targets.video.initialize(stream);
 }
 void CoordinatedDispatch::finalize(observed_abi::Stream stream) {
-    Invocation call(state_); call.targets.video.finalize(stream);
+    Invocation call(state_);
+    if (call.observation) { call.observation->retiring(stream); }
+    call.targets.video.finalize(stream);
 }
 void CoordinatedDispatch::dimensions(const void* stream, std::uint32_t width, std::uint32_t height) {
     Invocation call(state_); call.targets.video.setWidthHeight(stream, width, height);
 }
 observed_abi::Status CoordinatedDispatch::start(observed_abi::Stream stream, std::uint32_t type,
     observed_abi::String uuid) {
-    Invocation call(state_); return call.targets.video.start(stream, type, uuid);
+    Invocation call(state_);
+    if (call.observation) { call.observation->starting(stream, type, uuid); }
+    const auto status = call.targets.video.start(stream, type, uuid);
+    if (call.observation) { call.observation->started(status, stream, type, uuid); }
+    return status;
 }
 void CoordinatedDispatch::stop(observed_abi::Stream stream) {
-    Invocation call(state_); call.targets.video.stop(stream);
+    Invocation call(state_);
+    if (call.observation) { call.observation->retiring(stream); }
+    call.targets.video.stop(stream);
 }
 observed_abi::Status CoordinatedDispatch::avcc(const void* stream, const std::uint8_t* bytes,
     std::size_t length) {
@@ -112,10 +124,15 @@ observed_abi::Status CoordinatedDispatch::data(observed_abi::Stream stream, cons
 }
 observed_abi::Status CoordinatedDispatch::session(void* session, observed_abi::String uuid,
     std::uint32_t type, void* context) {
-    Invocation call(state_); return call.targets.session(session, uuid, type, context);
+    Invocation call(state_);
+    const auto invoke = [&] { return call.targets.session(session, uuid, type, context); };
+    return call.observation ? call.observation->session(session, uuid, type, invoke) : invoke();
 }
 DisplayArray CoordinatedDispatch::displays(observed_abi::Status* error) {
     Invocation call(state_); return call.targets.displays(error);
+}
+void CoordinatedDispatch::sessionBoundary(const std::function<void()>& apply) {
+    Invocation call(state_); apply();
 }
 
 namespace {

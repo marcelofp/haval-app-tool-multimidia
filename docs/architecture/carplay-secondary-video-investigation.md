@@ -1,5 +1,14 @@
 # CarPlay secondary-video investigation
 
+## OEM ABI entries and session authorization — 2026-10-23
+
+[OEM_ENTRY_BINDING.md](../../scripts/carplay-native-analysis/native/OEM_ENTRY_BINDING.md)
+records the nine C entries, exact-artifact offsets, retained callback-driven session
+capture, generation-bound permit and actual Unix OS-peer credential transport.
+Fourteen host modes passed ASan/UBSan and TSan; Python 15 passed/1 skip. No live OEM
+interception, loaded module attestation, trusted channel provisioning, Android build
+or car operation. Those activation gates remain; independent map video is unproven.
+
 ## Concrete dispatch source — 2026-10-23
 
 [Coordinated dispatch](../../scripts/carplay-native-analysis/native/COORDINATED_DISPATCH.md)

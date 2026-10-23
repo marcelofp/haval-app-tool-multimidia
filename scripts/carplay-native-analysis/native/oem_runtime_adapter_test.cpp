@@ -1,6 +1,14 @@
 #include "oem_runtime_adapter.h"
 #include "hook_installation.h"
 #include "coordinated_dispatch.h"
+#include "oem_entry_bridge.h"
+#include "hook_permit.h"
+#include "unix_hook_endpoint.h"
+
+#include <sys/socket.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <cstring>
 
 #include <cassert>
 #include <future>
@@ -124,12 +132,13 @@ public:
     void stop() noexcept override { ++decoderStops; }
 };
 
-std::unique_ptr<OemRuntimeAdapter> makeAdapter(bool enabled, bool ownedContract = true) {
+std::unique_ptr<OemRuntimeAdapter> makeAdapter(bool enabled, bool ownedContract = true,
+    observed_abi::VideoCallbacks original = originals(), OriginalStartSession sessionOriginal = originalSession) {
     SecondaryRuntimeConfig settings;
     settings.enabled = enabled;
     if (!enabled) {
         return std::make_unique<OemRuntimeAdapter>(std::make_unique<SecondaryRuntime>(
-            originals(), originalSession, settings, VideoBridge::DecoderFactory{}, UuidReader{}), getter);
+            original, sessionOriginal, settings, VideoBridge::DecoderFactory{}, UuidReader{}), getter);
     }
     settings.bridge.principal = {110, "main"};
     settings.bridge.secondary = {111, "secondary"};
@@ -156,7 +165,7 @@ std::unique_ptr<OemRuntimeAdapter> makeAdapter(bool enabled, bool ownedContract 
             return 0;
         }, reader()
     };
-    auto runtime = std::make_unique<SecondaryRuntime>(originals(), originalSession, settings,
+    auto runtime = std::make_unique<SecondaryRuntime>(original, sessionOriginal, settings,
         [lease](const StreamIdentity&) { return lease->claim(); }, reader(), session, generation,
         api, std::make_shared<int>(1));
     return std::make_unique<OemRuntimeAdapter>(std::move(runtime), getter, release, ownedContract);
@@ -597,6 +606,259 @@ void dispatchInstallerIntegration() {
     impulse_carplay_runtime_close();
     assert(dispatchFrame(*dispatch) == 37 && originalInitializes == 0 && alive == 0);
 }
+
+void permitAuthentication() {
+    std::atomic<std::uint64_t> now{1000};
+    std::atomic<std::uint64_t> generation{7};
+    HookAuthorization request;
+    request.enabled = true;
+    request.callerUid = 10001;
+    request.requestId = 9;
+    request.token.fill(42);
+    auto makePermit = [&] {
+        return std::make_shared<HookPermit>(10001, 7, 9, request.token, 900, 2000,
+            [&] { return now.load(); }, [&] { return generation.load(); });
+    };
+    auto permit = makePermit();
+    assert(!permit->consume(request, 10002));
+    auto invalid = request;
+    invalid.callerUid = 10002;
+    assert(!permit->consume(invalid, 10001));
+    invalid = request;
+    invalid.requestId = 8;
+    assert(!permit->consume(invalid, 10001));
+    invalid = request;
+    invalid.enabled = false;
+    assert(!permit->consume(invalid, 10001));
+    for (std::size_t index = 0; index < request.token.size(); ++index) {
+        invalid = request;
+        invalid.token[index] ^= 1;
+        assert(!permit->consume(invalid, 10001));
+    }
+    assert(permit->consume(request, 10001));
+    assert(!permit->consume(request, 10001));
+    permit = makePermit();
+    now.store(2000);
+    assert(!permit->consume(request, 10001));
+    now.store(1000);
+    assert(!permit->consume(request, 10001));
+    permit = makePermit();
+    generation.store(8);
+    assert(!permit->consume(request, 10001));
+    generation.store(7);
+    assert(!permit->consume(request, 10001));
+    permit = makePermit();
+    now.store(800);
+    assert(!permit->consume(request, 10001));
+    now.store(1000);
+    permit = makePermit();
+    auto first = std::async(std::launch::async, [&] { return permit->consume(request, 10001); });
+    auto second = std::async(std::launch::async, [&] { return permit->consume(request, 10001); });
+    assert(static_cast<int>(first.get()) + static_cast<int>(second.get()) == 1);
+    permit = makePermit();
+    permit->revoke();
+    assert(!permit->consume(request, 10001));
+    auto throwing = std::make_shared<HookPermit>(10001, 7, 9, request.token, 900, 2000,
+        []() -> std::uint64_t { throw std::runtime_error("clock unavailable"); }, [&] { return generation.load(); });
+    assert(!throwing->consume(request, 10001));
+    int preparations = 0;
+    auto prepare = authenticatedPreparation(makePermit(), [] { return std::optional<std::uint32_t>{10001}; },
+        [&](const HookAuthorization&) -> std::shared_ptr<PreparedHooks> { ++preparations; return {}; });
+    assert(!prepare(request) && preparations == 1);
+    assert(!prepare(request) && preparations == 1);
+}
+
+void unixPeerAuthentication() {
+    int descriptors[2];
+    assert(socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, descriptors) == 0);
+    std::array<std::uint8_t, 32> token;
+    token.fill(42);
+    const auto uid = static_cast<std::uint32_t>(getuid());
+    int preparations = 0;
+    auto permit = std::make_shared<HookPermit>(uid, 7, 9, token, 900, 2000,
+        [] { return 1000; }, [] { return 7; });
+    UnixHookEndpoint endpoint(descriptors[0], permit,
+        [&](const HookAuthorization&) -> std::shared_ptr<PreparedHooks> { ++preparations; return {}; });
+    close(descriptors[0]);
+    assert(!endpoint.poll());
+    std::array<std::uint8_t, 56> packet{};
+    const auto write = [&](std::size_t offset, std::uint64_t value, std::size_t width) {
+        for (std::size_t index = 0; index < width; ++index) {
+            packet[offset + index] = static_cast<std::uint8_t>(value >> (index * 8));
+        }
+    };
+    write(0, 0x31484943, 4);
+    write(4, 1, 4);
+    write(8, uid, 4);
+    write(16, 9, 8);
+    std::copy(token.begin(), token.end(), packet.begin() + 24);
+    auto malformed = packet;
+    malformed[12] = 1;
+    assert(::send(descriptors[1], malformed.data(), malformed.size(), 0) == 56);
+    assert(!endpoint.poll() && preparations == 0);
+    const int available = fcntl(descriptors[1], F_DUPFD_CLOEXEC, 3);
+    assert(available >= 0);
+    close(available);
+    alignas(cmsghdr) std::array<char, CMSG_SPACE(sizeof(int))> control{};
+    iovec payload{packet.data(), packet.size()};
+    msghdr message{};
+    message.msg_iov = &payload;
+    message.msg_iovlen = 1;
+    message.msg_control = control.data();
+    message.msg_controllen = control.size();
+    auto* header = CMSG_FIRSTHDR(&message);
+    header->cmsg_level = SOL_SOCKET;
+    header->cmsg_type = SCM_RIGHTS;
+    header->cmsg_len = CMSG_LEN(sizeof(int));
+    std::memcpy(CMSG_DATA(header), &descriptors[1], sizeof(int));
+    assert(sendmsg(descriptors[1], &message, 0) == 56);
+    assert(!endpoint.poll() && preparations == 0);
+    const int afterRights = fcntl(descriptors[1], F_DUPFD_CLOEXEC, 3);
+    assert(afterRights == available);
+    close(afterRights);
+    std::array<std::uint8_t, 57> oversized{};
+    assert(::send(descriptors[1], oversized.data(), oversized.size(), 0) == 57);
+    assert(!endpoint.poll() && preparations == 0);
+    write(8, uid + 1, 4);
+    assert(::send(descriptors[1], packet.data(), packet.size(), 0) == 56);
+    assert(endpoint.poll() == HookInstallResult::rejected && preparations == 0);
+    write(8, uid, 4);
+    assert(::send(descriptors[1], packet.data(), packet.size(), 0) == 56);
+    assert(endpoint.poll() == HookInstallResult::rejected && preparations == 1);
+    assert(::send(descriptors[1], packet.data(), packet.size(), 0) == 56);
+    assert(endpoint.poll() == HookInstallResult::rejected && preparations == 1);
+    close(descriptors[1]);
+    assert(!endpoint.poll());
+}
+
+std::atomic<int> uuidOwners{0};
+std::atomic<bool> failUuidRetain{false};
+std::atomic<int> mainStartStatus{0};
+std::atomic<Gate*> entryStartGate{nullptr};
+
+observed_abi::Status entryOriginalSession(void*, observed_abi::String uuid, std::uint32_t type, void*) {
+    const auto target = type == 110 ? stream(mainKey) : stream(secondaryKey);
+    auto result = impulse_carplay_entry_initialize(target);
+    if (result != 0) { return result; }
+    impulse_carplay_entry_dimensions(target, 1280, 720);
+    result = impulse_carplay_entry_avcc(target, configuration.data(), configuration.size());
+    return result != 0 ? result : impulse_carplay_entry_start(target, type, uuid);
+}
+
+void realEntryShapeAndSessionCapture() {
+    assert(impulse_carplay_entry_data(stream(mainKey), packet.data(), packet.size(), 1234,
+        nullptr, nullptr, nullptr) == VideoBridge::notReady);
+    auto nativeOwners = std::make_shared<int>(1);
+    auto original = originals();
+    original.start = [](observed_abi::Stream, std::uint32_t, observed_abi::String) {
+        if (auto gate = entryStartGate.exchange(nullptr)) { gate->block(); }
+        return mainStartStatus.load();
+    };
+    const auto makeBridge = [&] {
+        return std::make_unique<OemEntryBridge>(DispatchTargets{original, entryOriginalSession, getter},
+            mainUuid, reader(), makeCapturedUuidOwner([](const void* uuid) -> const void* {
+                if (failUuidRetain.load()) { throw std::runtime_error("retain failed"); }
+                ++uuidOwners;
+                return uuid;
+            }, [](const void*) { --uuidOwners; }, nativeOwners), nativeOwners);
+    };
+    assert(!pinOemEntryBridge(makeBridge()));
+    auto owner = makeBridge();
+    auto* bridge = owner.get();
+    auto capture = bridge->capture();
+    auto dispatch = bridge->dispatch();
+    assert(pinOemEntryBridge(std::move(owner), true));
+    assert(!pinOemEntryBridge(makeBridge(), true));
+    int nativeSession = 0;
+    assert(impulse_carplay_entry_start(stream(mainKey), 110, string(mainUuid)) == 0);
+    assert(!capture->capture().stream);
+    const auto startSession = [&] {
+        return impulse_carplay_entry_session(&nativeSession, string(mainUuid), 110, nullptr);
+    };
+    assert(startSession() == 0);
+    auto old = capture->capture();
+    assert(capture->isCurrent(old) && uuidOwners == 1);
+    impulse_carplay_entry_stop(stream(secondaryKey));
+    assert(capture->isCurrent(old));
+    impulse_carplay_entry_stop(stream(mainKey));
+    assert(!capture->isCurrent(old) && !capture->capture().stream);
+    assert(startSession() == 0);
+    auto current = capture->capture();
+    assert(capture->isCurrent(current) && current.epoch != old.epoch && !capture->isCurrent(old));
+    old = {};
+    current = {};
+    impulse_carplay_entry_finalize(stream(mainKey));
+    assert(!capture->capture().stream && uuidOwners == 0);
+    failUuidRetain.store(true);
+    assert(startSession() == 0 && !capture->capture().stream);
+    failUuidRetain.store(false);
+    mainStartStatus.store(-333);
+    assert(startSession() == -333 && !capture->capture().stream);
+    mainStartStatus.store(0);
+    Gate blocker;
+    entryStartGate.store(&blocker);
+    auto pending = std::async(std::launch::async, startSession);
+    blocker.wait();
+    assert(!dispatch->tryFreeze());
+    impulse_carplay_entry_stop(stream(mainKey));
+    blocker.release();
+    assert(pending.get() == 0 && !capture->capture().stream);
+    Gate replaced;
+    entryStartGate.store(&replaced);
+    auto stale = std::async(std::launch::async, startSession);
+    replaced.wait();
+    assert(startSession() == 0);
+    current = capture->capture();
+    assert(capture->isCurrent(current));
+    replaced.release();
+    assert(stale.get() == 0 && capture->isCurrent(current));
+    current = {};
+    HookAuthorization authorization;
+    authorization.enabled = true;
+    authorization.callerUid = 10001;
+    authorization.requestId = 99;
+    authorization.token.fill(42);
+    const auto prepared = [capture, dispatch, nativeOwners, original](const HookAuthorization&) {
+        return std::make_shared<DispatchPreparedHooks>(dispatch,
+            [original] { return makeAdapter(true, true, original, entryOriginalSession); },
+            [capture] { return capture->capture(); },
+            [capture](const LivePrincipal& value) { return capture->isCurrent(value); }, nativeOwners);
+    };
+    auto stalePermit = std::make_shared<HookPermit>(10001, capture->capture().epoch, 99, authorization.token,
+        900, 2000, [] { return 1000; }, [capture] { return capture->capture().epoch; });
+    HookInstaller staleInstaller(authenticatedPreparation(stalePermit,
+        [] { return std::optional<std::uint32_t>{10001}; },
+        [&](const HookAuthorization& request) {
+            assert(startSession() == 0);
+            return prepared(request);
+        }));
+    assert(staleInstaller.install(authorization) == HookInstallResult::invalidPrincipal);
+    auto permit = std::make_shared<HookPermit>(10001, capture->capture().epoch, 99, authorization.token,
+        900, 2000, [] { return 1000; }, [capture] { return capture->capture().epoch; });
+    HookInstaller installer(authenticatedPreparation(permit,
+        [] { return std::optional<std::uint32_t>{10001}; },
+        prepared));
+    const auto initializedBefore = originalInitializes;
+    assert(installer.install(authorization) == HookInstallResult::installed);
+    assert(originalInitializes == initializedBefore);
+    assert(impulse_carplay_entry_data(stream(mainKey), packet.data(), packet.size(), 1234,
+        nullptr, nullptr, nullptr) == 37);
+    observed_abi::Status error = -1;
+    auto displays = impulse_carplay_entry_displays(&error);
+    assert(error == 0 && displays->displays.back() == 111);
+    release(displays);
+    impulse_carplay_entry_invalidate_session();
+    assert(!capture->capture().stream);
+    assert(impulse_carplay_entry_data(stream(mainKey), packet.data(), packet.size(), 1234,
+        nullptr, nullptr, nullptr) == 37);
+    frameThrows = true;
+    assert(impulse_carplay_entry_data(stream(mainKey), packet.data(), packet.size(), 1234,
+        nullptr, nullptr, nullptr) == VideoBridge::decoderFailure);
+    frameThrows = false;
+    assert(bridge->faults() == 0 && impulse_carplay_runtime_faults() == 1);
+    impulse_carplay_entry_finalize(stream(mainKey));
+    assert(alive == 0);
+}
 }
 
 int main(int count, char** arguments) {
@@ -610,6 +872,9 @@ int main(int count, char** arguments) {
     }
     else if (mode == "dispatch") { dispatchQuiescence(); }
     else if (mode == "dispatch-install") { dispatchInstallerIntegration(); }
+    else if (mode == "permit") { permitAuthentication(); }
+    else if (mode == "unix-peer") { unixPeerAuthentication(); }
+    else if (mode == "entry") { realEntryShapeAndSessionCapture(); }
     else { assert(mode == "legacy" || mode == "race"); legacyAndContestedRegistration(mode == "race"); }
     std::cout << "OEM runtime " << mode << ": C boundary, getter ownership/repeat and registration checks passed\n";
 }

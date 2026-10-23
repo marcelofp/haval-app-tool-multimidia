@@ -1,5 +1,10 @@
 # Coordinated callback dispatch backend
 
+The subsequent [OEM entry bridge](OEM_ENTRY_BINDING.md) adds capture observations
+inside admitted calls, C boundaries, permits and real Unix peer transport. This
+document's original absent-provider notes describe that earlier stage; full OEM
+cold interception/module attestation and app provisioning are still missing.
+
 `CoordinatedDispatch` implements a shared admission barrier and complete route
 replacement for seven video callbacks, StartSession and the display getter.
 `DispatchPreparedHooks` plugs this mechanism into `HookInstaller`.

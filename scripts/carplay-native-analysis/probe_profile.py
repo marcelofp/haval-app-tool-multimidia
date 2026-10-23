@@ -23,9 +23,9 @@ PROFILES = {
 }
 
 
-def generate(directory):
+def generate(directory, profiles=PROFILES):
     modules = []
-    for name, (expected, targets) in PROFILES.items():
+    for name, (expected, targets) in profiles.items():
         path = Path(directory) / ('vendor__app__TsCarPlayService__lib__arm64__' + name)
         with path.open('rb') as stream:
             digest = hashlib.file_digest(stream, 'sha256').hexdigest()
