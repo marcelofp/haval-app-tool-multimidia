@@ -1,5 +1,16 @@
 # Offline CarPlay native audit
 
+## Latest validation — 2026-10-23
+
+Source `1f1a1f7d` passed authorized Mac Mini Java/Kotlin/JNI/ARM64 compilation and
+Debug assembly in 2m19s. assembleDebug now also runs testDebugUnitTest. XML reports:
+837 tests, zero failures/errors, one expected seed-generator skip. All seven new
+experimental Debug policy/retirement methods executed/passed. Earlier pending-test
+notes below describe the implementation stages, not current validation status.
+Linked native runtime exports verified; bridge remains excluded from the internal
+Debug APK. No production signing/version/OTA/install or vehicle test performed.
+This does not prove Binder/GPU/OEM ownership, actual hook installation or clean map.
+
 Read-only ELF analysis, not an Android feature, native patch or deployment tool.
 Requires Python 3.11+, with the pinned dependencies in requirements.txt installed
 in an isolated virtual environment. OEM binaries are private inputs, never bundled.

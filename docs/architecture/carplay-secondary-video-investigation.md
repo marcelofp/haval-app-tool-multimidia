@@ -4,6 +4,13 @@
 
 ### Independent Surface and advertisement follow-up
 
+Combined source 1f1a1f7d has now passed authorized Mini Java/Kotlin/JNI/ARM64
+compilation and 837 JVM tests (zero failures/errors, one seed-generator skip).
+All seven experimental policy/retirement methods passed. Native runtime exports
+were checked in the linked AArch64 ELF; the .so remains excluded from the internal
+Debug APK. These results close the compilation/unit gate, not actual Binder/GPU,
+OEM installation, retained-array ownership or iPhone negotiation validation.
+
 The source OEM adapter now wraps the getter and video/session C boundary, with
 exception containment, explicit owned-array replacement and repeated immutable
 announcements. Legacy ingress/runtime share a process-only registration gate.
