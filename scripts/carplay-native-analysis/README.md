@@ -518,9 +518,9 @@ and fake decoders, not actual CoreUtils/OEM execution:
 
 ```sh
 g++ -std=c++17 -Wall -Wextra -Werror -pthread -fsanitize=address,undefined \
-  -fno-omit-frame-pointer -g scripts/carplay-native-analysis/native/{packet_conversion,avc_configuration,video_bridge,oem_ingress,decoder_lease,secondary_advertisement,secondary_session,secondary_runtime,oem_runtime_adapter,hook_installation,oem_runtime_adapter_test}.cpp \
+  -fno-omit-frame-pointer -g scripts/carplay-native-analysis/native/{packet_conversion,avc_configuration,video_bridge,oem_ingress,decoder_lease,secondary_advertisement,secondary_session,secondary_runtime,oem_runtime_adapter,hook_installation,coordinated_dispatch,oem_runtime_adapter_test}.cpp \
   -o /tmp/carplay-oem-runtime-test
-for mode in off enabled legacy race adopt close-getter install install-fail install-contested; do
+for mode in off enabled legacy race adopt close-getter install install-fail install-contested dispatch dispatch-install; do
   timeout 25 /tmp/carplay-oem-runtime-test "$mode" || exit
 done
 ```
@@ -534,3 +534,8 @@ Android compilation, version, signing, OTA or vehicle operation performed.
 The inert hook coordinator and mandatory real-backend contract are described in
 [native/HOOK_INSTALLATION.md](native/HOOK_INSTALLATION.md). Installation modes use
 a fake quiescence/publication backend; they do not install hooks on the vehicle.
+
+[native/COORDINATED_DISPATCH.md](native/COORDINATED_DISPATCH.md) describes the
+concrete admission/publication backend and its two added portable modes. The
+dispatch integration no longer uses the earlier fake transaction, but still has
+synthetic capture/native owners and no OEM cold-entry installation or authentication.

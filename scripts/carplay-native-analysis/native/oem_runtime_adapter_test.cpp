@@ -1,5 +1,6 @@
 #include "oem_runtime_adapter.h"
 #include "hook_installation.h"
+#include "coordinated_dispatch.h"
 
 #include <cassert>
 #include <future>
@@ -459,6 +460,143 @@ void coordinatedInstallation(bool failPublication, bool contested) {
         nullptr, nullptr, nullptr) == 37);
     assert(originalInitializes == 0 && decoderCreates == 0 && alive == 0);
 }
+
+std::atomic<Gate*> dispatchDataGate{nullptr};
+std::array<int, 9> replacementCalls{};
+std::shared_ptr<CoordinatedDispatch> nestedDispatch;
+
+DispatchTargets originalDispatchTargets() {
+    auto video = originals();
+    video.processData = [](observed_abi::Stream target, const std::uint8_t* bytes, std::size_t length,
+        std::uint64_t ticks, observed_abi::Dictionary options, observed_abi::Completion completion, void* context) {
+        if (auto gate = dispatchDataGate.load()) { gate->block(); }
+        if (nestedDispatch) {
+            assert(!nestedDispatch->tryFreeze());
+            assert(nestedDispatch->start(target, 110, string(mainUuid)) == 0);
+        }
+        return originals().processData(target, bytes, length, ticks, options, completion, context);
+    };
+    return {video, [](void*, observed_abi::String, std::uint32_t, void*) { return 12; }, getter};
+}
+
+DispatchTargets replacementDispatchTargets() {
+    return {{
+        [](observed_abi::Stream) { ++replacementCalls[0]; return 51; },
+        [](observed_abi::Stream) { ++replacementCalls[1]; },
+        [](const void*, std::uint32_t, std::uint32_t) { ++replacementCalls[2]; },
+        [](observed_abi::Stream, std::uint32_t, observed_abi::String) { ++replacementCalls[3]; return 52; },
+        [](observed_abi::Stream) { ++replacementCalls[4]; },
+        [](const void*, const std::uint8_t*, std::size_t) { ++replacementCalls[5]; return 53; },
+        [](observed_abi::Stream, const std::uint8_t*, std::size_t, std::uint64_t,
+            observed_abi::Dictionary, observed_abi::Completion, void*) { ++replacementCalls[6]; return 54; }
+    }, [](void*, observed_abi::String, std::uint32_t, void*) { ++replacementCalls[7]; return 55; },
+    [](observed_abi::Status* error) { ++replacementCalls[8]; *error = 0; return array({111}); }};
+}
+
+observed_abi::Status dispatchFrame(CoordinatedDispatch& dispatch) {
+    return dispatch.data(stream(mainKey), packet.data(), packet.size(), 1234, nullptr, nullptr, nullptr);
+}
+
+void dispatchQuiescence() {
+    auto dispatch = std::make_shared<CoordinatedDispatch>(originalDispatchTargets());
+    auto invalid = originalDispatchTargets();
+    invalid.session = nullptr;
+    bool constructorRejected = false;
+    try { CoordinatedDispatch rejected(invalid); }
+    catch (const std::invalid_argument&) { constructorRejected = true; }
+    assert(constructorRejected);
+    nestedDispatch = dispatch;
+    assert(dispatchFrame(*dispatch) == 37);
+    nestedDispatch.reset();
+    Gate blocker;
+    dispatchDataGate.store(&blocker);
+    auto activeFrame = std::async(std::launch::async, [&] { return dispatchFrame(*dispatch); });
+    blocker.wait();
+    assert(!dispatch->tryFreeze());
+    assert(dispatch->start(stream(mainKey), 110, string(mainUuid)) == 0);
+    dispatchDataGate.store(nullptr);
+    blocker.release();
+    assert(activeFrame.get() == 37);
+    frameThrows = true;
+    bool frameFailed = false;
+    try { dispatchFrame(*dispatch); } catch (const std::runtime_error&) { frameFailed = true; }
+    assert(frameFailed);
+    frameThrows = false;
+    {
+        auto rollback = dispatch->tryFreeze();
+        assert(rollback && !dispatch->tryFreeze());
+        assert(!rollback->replace(invalid));
+        bool reentryRejected = false;
+        try { dispatchFrame(*dispatch); } catch (const std::logic_error&) { reentryRejected = true; }
+        assert(reentryRejected);
+    }
+    assert(dispatchFrame(*dispatch) == 37);
+    auto freeze = dispatch->tryFreeze();
+    assert(freeze);
+    std::promise<void> incoming;
+    auto waiting = std::async(std::launch::async, [&] {
+        incoming.set_value();
+        assert(dispatch->initialize(stream(mainKey)) == 51);
+        dispatch->finalize(stream(mainKey));
+        dispatch->dimensions(stream(mainKey), 1280, 720);
+        assert(dispatch->start(stream(mainKey), 110, string(mainUuid)) == 52);
+        dispatch->stop(stream(mainKey));
+        assert(dispatch->avcc(stream(mainKey), configuration.data(), configuration.size()) == 53);
+        assert(dispatchFrame(*dispatch) == 54);
+        assert(dispatch->session(nullptr, string(mainUuid), 110, nullptr) == 55);
+        observed_abi::Status error = -1;
+        auto result = dispatch->displays(&error);
+        assert(error == 0 && result->displays == std::vector<int>{111});
+        release(result);
+    });
+    incoming.get_future().wait();
+    assert(waiting.wait_for(std::chrono::milliseconds(10)) == std::future_status::timeout);
+    assert(freeze->replace(replacementDispatchTargets()));
+    assert(!freeze->replace(originalDispatchTargets()));
+    assert(waiting.wait_for(std::chrono::milliseconds(10)) == std::future_status::timeout);
+    freeze.reset();
+    waiting.get();
+    for (const auto count : replacementCalls) { assert(count == 1); }
+    assert(alive == 0);
+}
+
+void dispatchInstallerIntegration() {
+    auto dispatch = std::make_shared<CoordinatedDispatch>(originalDispatchTargets());
+    std::weak_ptr<void> pinnedNative;
+    auto failures = std::make_shared<std::array<bool, 2>>(std::array<bool, 2>{true, false});
+    HookInstaller installer([&](const HookAuthorization&) {
+        auto nativeOwners = std::make_shared<int>(1);
+        pinnedNative = nativeOwners;
+        return std::make_shared<DispatchPreparedHooks>(dispatch, [] { return makeAdapter(true); },
+            [failures] {
+                if ((*failures)[0]) { throw std::runtime_error("live capture failed"); }
+                return LivePrincipal{stream(mainKey), string(mainUuid), 110, 7, std::make_shared<int>(9)};
+            },
+            [failures](const LivePrincipal& principal) {
+                if ((*failures)[1]) { throw std::runtime_error("epoch verification failed"); }
+                return principal.epoch == 7;
+            }, nativeOwners);
+    });
+    HookAuthorization authorization;
+    authorization.enabled = true;
+    assert(dispatchFrame(*dispatch) == 37);
+    assert(installer.install(authorization) == HookInstallResult::fault);
+    assert(dispatchFrame(*dispatch) == 37);
+    (*failures)[0] = false;
+    (*failures)[1] = true;
+    assert(installer.install(authorization) == HookInstallResult::stalePrincipal);
+    assert(dispatchFrame(*dispatch) == 37);
+    (*failures)[1] = false;
+    assert(installer.install(authorization) == HookInstallResult::installed);
+    assert(!pinnedNative.expired());
+    assert(dispatchFrame(*dispatch) == 37 && originalInitializes == 0);
+    observed_abi::Status error = -1;
+    auto result = dispatch->displays(&error);
+    assert(error == 0 && result->displays.back() == 111);
+    release(result);
+    impulse_carplay_runtime_close();
+    assert(dispatchFrame(*dispatch) == 37 && originalInitializes == 0 && alive == 0);
+}
 }
 
 int main(int count, char** arguments) {
@@ -470,6 +608,8 @@ int main(int count, char** arguments) {
     else if (mode == "install" || mode == "install-fail" || mode == "install-contested") {
         coordinatedInstallation(mode == "install-fail", mode == "install-contested");
     }
+    else if (mode == "dispatch") { dispatchQuiescence(); }
+    else if (mode == "dispatch-install") { dispatchInstallerIntegration(); }
     else { assert(mode == "legacy" || mode == "race"); legacyAndContestedRegistration(mode == "race"); }
     std::cout << "OEM runtime " << mode << ": C boundary, getter ownership/repeat and registration checks passed\n";
 }

@@ -1,5 +1,14 @@
 # CarPlay secondary-video investigation
 
+## Concrete dispatch source — 2026-10-23
+
+[Coordinated dispatch](../../scripts/carplay-native-analysis/native/COORDINATED_DISPATCH.md)
+now implements shared admission, active-call tracking and complete route switching,
+with concrete PreparedHooks integration. Eleven portable modes passed ASan/UBSan
+and TSan. Initial interception of OEM entry points, authenticated live bootstrap,
+real module/UUID ownership and epoch capture remain unimplemented. New code has
+not been Android-built or deployed; native packaging stays excluded/default off.
+
 ## Hook coordination source — 2026-10-23
 
 The inert [HookInstaller](../../scripts/carplay-native-analysis/native/HOOK_INSTALLATION.md)

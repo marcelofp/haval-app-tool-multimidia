@@ -5,6 +5,12 @@ backend, JNI entry, manifest registration, injection code or app call site. It
 cannot install real hooks by itself. Native packaging remains excluded. This
 source change does not produce an APK, release or OTA.
 
+The [concrete coordinated dispatch backend](COORDINATED_DISPATCH.md) now implements
+admission and atomic route publication. Actual initial OEM entry interception,
+authentication, attestation and live capture providers remain absent. Earlier
+references below to the absent real backend refer to that full platform boundary,
+not to the now-implemented portable dispatcher.
+
 ## Order enforced by the coordinator
 
 1. Default disabled returns before invoking any backend. A concurrent request on
