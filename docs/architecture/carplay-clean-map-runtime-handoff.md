@@ -46,7 +46,9 @@ native installation. The UI and Surface retirement remain bounded and reversible
 ## Evidence status
 
 Portable entry/dispatch tests pass under ASan/UBSan, and the OEM control script
-passes JavaScript syntax validation. Android ARM64 compilation, release packaging,
-the control-plane injection, AltScreen acceptance, stream-111 callbacks and a
+passes JavaScript syntax validation. Commit `81923701` passed the authorized Mac
+Mini ARM64/JNI/AIDL/Kotlin/Java build and full Debug JVM suite in 2m01s. The linked
+bridge SHA-256 is `aeefaa91be9dc805047e3006cfdb73ea45dd4b94ed67891d956f4cd40b534411`.
+Release packaging, the control-plane injection, AltScreen acceptance, stream-111 callbacks and a
 first rendered display-3 frame are not established by this source checkpoint.
 Those are separate gates before claiming that clean CarPlay maps work.

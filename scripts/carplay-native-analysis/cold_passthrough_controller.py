@@ -391,7 +391,7 @@ class ColdPassthroughController:
 def default_inputs() -> Inputs:
     root = Path(__file__).resolve().parent
     return Inputs(
-        bridge=Path("/root/projects/haval-impulse/artifacts/carplay-131-6d725462-debug/native/libcarplay_video_bridge.so"),
+        bridge=Path("/root/projects/haval-impulse/artifacts/carplay-clean-map-81923701-debug/native/libcarplay_video_bridge.so"),
         interceptor=root / "cold_oem_interceptor.js",
         profile=root / "testdata/oem-cold-profile-v3.json",
         endpoint=root / "carplay_clean_map_endpoint.js",
