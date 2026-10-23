@@ -134,7 +134,8 @@ class HudOverlayRenderer {
         val phase = if (ch.animate) (nowMs % period.toLong()) / period else 0f
         val appear = 1f
         val base = if (ch.animate) 0.45f + 0.4f * t else 0.9f
-        val marks = M.chevronStrip(ch.side, ch.sharp, t)
+        // Still: the direction arrow round the arc ("Sempre" far away; on the diagonal from 100 m).
+        val marks = if (ch.animate) M.chevronStrip(ch.side, ch.sharp, t) else listOf(M.chevronCompass(ch.side, ch.sharp, ch.lean))
         // A right-pointing chevron round the origin, turned to each one's direction.
         chevronPath.reset()
         chevronPath.moveTo(-M.CHEVRON_W, -M.CHEVRON_HALF_H)
@@ -152,7 +153,7 @@ class HudOverlayRenderer {
             chevronPaint.alpha = (255 * appear * mark.appear * (base + (1f - base) * pulse)).toInt().coerceIn(0, 255)
             canvas.save()
             canvas.translate(mark.x, mark.y)
-            canvas.rotate(if (ch.animate) mark.dir else -90f + (mark.dir + 90f) * ch.lean)
+            canvas.rotate(mark.dir)
             canvas.drawPath(chevronPath, chevronPaint)
             canvas.restore()
         }

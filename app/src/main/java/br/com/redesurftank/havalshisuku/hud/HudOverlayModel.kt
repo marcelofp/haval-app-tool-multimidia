@@ -489,6 +489,21 @@ object HudOverlayModel {
     data class ChevronMark(val x: Float, val y: Float, val dir: Float, val appear: Float = 1f)
 
     /**
+     * The "Sempre" chevron, a direction arrow round the power arc (owner): at [lean] 0 on top
+     * of the arc pointing straight up (the turn is still ahead); as the turn nears it travels
+     * round the arc to the turn's side, leaning over, and at 1 it is exactly where the
+     * near-turn chevrons start, so they take over without a jump.
+     */
+    fun chevronCompass(side: Int, sharp: Boolean, lean: Float): ChevronMark {
+        val l = lean.coerceIn(0f, 1f)
+        val start = if (sharp) CHEVRON_SHARP_START_DEG else CHEVRON_SOFT_START_DEG
+        val end = if (side > 0) start else 540f - start
+        val (x, y) = arcPoint(270f + (end - 270f) * l, ARC_POWER_R_OUT + CHEVRON_ARC_GAP)
+        val dir0 = if (side > 0) -45f else -135f
+        return ChevronMark(x, y, -90f + (dir0 + 90f) * l)
+    }
+
+    /**
      * The chevrons at [intensity] 0 (one, still, on the diagonal) .. 1 (the turn), rear first,
      * lead last (owner, 2026-10-23). First more chevrons grow out along the same diagonal; then
      * a [sharp] turn's strip moves on in its direction while the rear rises, ending as a

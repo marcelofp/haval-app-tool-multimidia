@@ -387,6 +387,19 @@ class HudArArrowTest {
         assertEquals(0f, always.lean, 0.001f)
         assertEquals(0.5f, HudOverlayModel.frameFor(ar.copy(chevronsAlways = true), d, 0, null, arMetersOverride = 200f).chevrons!!.lean, 0.01f)
         assertEquals(1f, HudOverlayModel.frameFor(ar.copy(chevronsAlways = true), d, 0, null, arMetersOverride = 90f).chevrons!!.lean, 0.001f)
+        // It travels round the arc: on top pointing up, then to the turn's side, ending where the strip starts.
+        val top = HudOverlayModel.chevronCompass(1, true, 0f)
+        assertEquals(HudOverlayModel.ARC_CX, top.x, 0.01f) // on top of the arc, round the native speed
+        assertEquals(-90f, top.dir, 0.01f)
+        val mid = HudOverlayModel.chevronCompass(1, true, 0.5f)
+        assertTrue(mid.x > top.x && mid.y > top.y)
+        val near = HudOverlayModel.chevronCompass(1, true, 1f)
+        val strip = HudOverlayModel.chevronStrip(1, true, 0f)[0]
+        assertEquals(strip.x, near.x, 0.01f)
+        assertEquals(strip.y, near.y, 0.01f)
+        assertEquals(strip.dir, near.dir, 0.01f)
+        assertTrue(HudOverlayModel.chevronCompass(-1, false, 0.5f).x < HudOverlayModel.ARC_CX)
+        assertTrue(top.y - HudOverlayModel.CHEVRON_STROKE >= 40f)
     }
 
     @Test
