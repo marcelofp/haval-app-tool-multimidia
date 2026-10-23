@@ -236,3 +236,8 @@ client destruction and independent progress while another submission blocks.
 API references: [Surface Parcelable/lifetime](https://developer.android.com/reference/android/view/Surface),
 [Binder death](https://developer.android.com/reference/android/os/IBinder.DeathRecipient),
 [native window references](https://developer.android.com/ndk/reference/group/a-native-window).
+
+Source `7e707bc` passed Java compilation, ARM64 CMake/link and assembleDebug on the
+authorized Mini in 1m55s. Both JNI exports were verified in the linked ELF; the
+endpoint class appears in Debug DEX, manifest stays unchanged and native library
+remains excluded. This validates compilation/packaging, not Android execution.
