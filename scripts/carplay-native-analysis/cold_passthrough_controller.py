@@ -269,6 +269,7 @@ class ColdPassthroughController:
         self.inputs = inputs
         self.nonce: str | None = None
         self.pid: int | None = None
+        self.oem_uid: int | None = None
 
     def preflight(self) -> dict[str, str]:
         output = self.remote.run(
@@ -280,15 +281,20 @@ class ColdPassthroughController:
             "printf 'carplay_tasks='; am stack list 2>/dev/null | grep -c 'com.ts.carplay.app' || true; "
             "printf 'aa_tasks='; am stack list 2>/dev/null "
             "| grep -e 'com.google.android.projection.gearhead' -e 'com.ts.androidauto' -c || true; "
+            "printf 'oem_uid='; dumpsys package com.ts.carplay 2>/dev/null "
+            "| grep -im1 userid | cut -d= -f2; "
             "printf 'pid='; pidof " + OEM_PROCESS + " || true"
         )
-        values = dict(re.findall(r"(?m)^(mounted|staged|injector|carplay_tasks|aa_tasks|pid)=([^\n]*)", output))
+        values = dict(re.findall(r"(?m)^(mounted|staged|injector|carplay_tasks|aa_tasks|oem_uid|pid)=([^\n]*)", output))
         if values.get("mounted") != EXPECTED_GATE_MD5 or values.get("staged") != EXPECTED_GATE_MD5:
             raise ControllerError("The exact reviewed cold-gate service patch is not both staged and mounted")
         if values.get("injector") != "yes":
             raise ControllerError("The vetted Frida injector is unavailable")
         if values.get("carplay_tasks") != "0" or values.get("aa_tasks") != "0":
             raise ControllerError("A CarPlay or Android Auto visual task is active")
+        if not re.fullmatch(r"[1-9][0-9]*", values.get("oem_uid", "")):
+            raise ControllerError("Unable to resolve the OEM CarPlay UID")
+        self.oem_uid = int(values["oem_uid"])
         return values
 
     def stage(self) -> dict[str, str | int]:
@@ -308,6 +314,15 @@ class ColdPassthroughController:
         self.remote.upload(template, REMOTE_LAUNCHER, "600")
         print("[cold] uploading endpoint", file=sys.stderr, flush=True)
         self.remote.upload(endpoint_script, REMOTE_ENDPOINT_LAUNCHER, "600")
+        if self.oem_uid is None:
+            raise ControllerError("OEM CarPlay UID was not established by preflight")
+        self.remote.run(
+            f"chown {self.oem_uid}:{self.oem_uid} {shell_quote(STAGE_ROOT)} {shell_quote(CONTROL_ROOT)} "
+            f"{shell_quote(REMOTE_BRIDGE)} {shell_quote(REMOTE_LAUNCHER)} {shell_quote(REMOTE_ENDPOINT_LAUNCHER)}; "
+            f"chmod 700 {shell_quote(STAGE_ROOT)} {shell_quote(CONTROL_ROOT)}; "
+            f"chmod 500 {shell_quote(REMOTE_BRIDGE)}; "
+            f"chmod 600 {shell_quote(REMOTE_LAUNCHER)} {shell_quote(REMOTE_ENDPOINT_LAUNCHER)}"
+        )
         print("[cold] staging verified", file=sys.stderr, flush=True)
         return {
             "bridgeSize": len(bridge),
@@ -407,7 +422,11 @@ class ColdPassthroughController:
                 raise ControllerError(f"Cold interceptor did not arm (phase={phase}): {log[-1200:]}")
 
             release_file = f"{CONTROL_ROOT}/release.{self.pid}.{self.nonce}"
-            self.remote.run(f"umask 077; : > {shell_quote(release_file)}")
+            self.remote.run(
+                f"umask 077; : > {shell_quote(release_file)}; "
+                f"chown {self.oem_uid}:{self.oem_uid} {shell_quote(release_file)}; "
+                f"chmod 400 {shell_quote(release_file)}"
+            )
             print("[cold] startup released", file=sys.stderr, flush=True)
             phase, log = self._wait_phase({"installed-pinned", "failed", "failed-pinned"}, time.monotonic() + 8.0)
             if phase != "installed-pinned":
