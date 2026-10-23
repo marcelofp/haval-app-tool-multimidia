@@ -465,6 +465,11 @@ object HudOverlayController {
         main.post { HudOverlaySettings.save(config().copy(mapStreets = on, layout = configCache?.layout ?: config().layout)) }
     }
 
+    /** Debug `--es hudMapEdges on|off`: the map's streets as edge lines, saved like the Telas option. */
+    internal fun setMapEdgesDebug(on: Boolean) {
+        main.post { HudOverlaySettings.save(HudOverlaySettings.load().copy(mapEdges = on)) }
+    }
+
     internal fun demo(mode: String) {
         val threeLanes = listOf(
             listOf(AndroidAutoNavigationTelemetry.LaneDirection(1, false)),

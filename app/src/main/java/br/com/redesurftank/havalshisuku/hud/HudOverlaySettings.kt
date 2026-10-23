@@ -29,7 +29,10 @@ object HudOverlaySettings {
             chevrons = prefs.getBoolean(SharedPreferencesKeys.HUD_AR_CHEVRONS.key, defaults.chevrons),
             arPlacement = HudArArrow.Placement.fromKey(prefs.getString(SharedPreferencesKeys.HUD_AR_PLACEMENT.key, null))
                 ?: defaults.arPlacement,
-            mapStreets = prefs.getBoolean(SharedPreferencesKeys.HUD_AR_MAP.key, defaults.mapStreets)
+            mapStreets = prefs.getBoolean(SharedPreferencesKeys.HUD_AR_MAP.key, defaults.mapStreets),
+            mapEdges = prefs.getBoolean(SharedPreferencesKeys.HUD_AR_MAP_EDGES.key, defaults.mapEdges),
+            showTurnFromM = prefs.getInt(SharedPreferencesKeys.HUD_NAV_SHOW_TURN_FROM_M.key, defaults.showTurnFromM)
+                .takeIf { it in HudOverlayModel.SHOW_TURN_FROM_OPTIONS } ?: defaults.showTurnFromM
         )
     }
 
@@ -59,6 +62,8 @@ object HudOverlaySettings {
             .putBoolean(SharedPreferencesKeys.HUD_AR_CHEVRONS.key, config.chevrons)
             .putString(SharedPreferencesKeys.HUD_AR_PLACEMENT.key, config.arPlacement.key)
             .putBoolean(SharedPreferencesKeys.HUD_AR_MAP.key, config.mapStreets)
+            .putBoolean(SharedPreferencesKeys.HUD_AR_MAP_EDGES.key, config.mapEdges)
+            .putInt(SharedPreferencesKeys.HUD_NAV_SHOW_TURN_FROM_M.key, config.showTurnFromM)
             .remove(LEGACY_ENABLED_KEY)
             .apply()
         HudOverlayController.setConfig(config)

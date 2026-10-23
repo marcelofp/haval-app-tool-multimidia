@@ -119,7 +119,7 @@ object HudOverlayModel {
     }
 
     /** The far row shows the street under the arrow; the big arrow and the lane rows don't. */
-    fun showsStreet(tbt: Tbt): Boolean = tbt.style == TbtStyle.FAR && tbt.street.isNotEmpty()
+    fun showsStreet(tbt: Tbt): Boolean = tbt.style == TbtStyle.FAR && tbt.street.isNotEmpty() && !tbt.turnHidden
 
     // Bars on the bottom row of the visible band, no labels: power at the HUD's left edge, RPM at
     // its right edge (the native HUD leaves the bottom of both sides empty). Approved in the
@@ -601,7 +601,11 @@ object HudOverlayModel {
         /** Bend of this maneuver (+ right). Null on a roundabout (the exit angle is used) or an unknown shape. */
         val guideAngle: Float? = null,
         /** 0 approaching a roundabout, then how far round the ring toward the exit (0..1). */
-        val rbProgress: Float = 0f
+        val rbProgress: Float = 0f,
+        /** Further than [Config.showTurnFromM]: icon, distance, street and lanes are not drawn. */
+        val turnHidden: Boolean = false,
+        /** AR map: grey streets as edge lines ([Config.mapEdges]). */
+        val mapEdges: Boolean = false
     ) {
         /** Draw the roundabout with its real exit instead of the static icon. */
         val dynamicRoundabout: Boolean get() = icon == "ROUNDABOUT" && exitAngle != null
@@ -774,7 +778,14 @@ object HudOverlayModel {
         /** AR: arrow in the centre (under the speed) or between the native lane-assist lines. */
         val arPlacement: HudArArrow.Placement = HudArArrow.Placement.CENTER,
         /** AR: real streets round the car from OpenStreetMap, in light grey (beta, off by default). */
-        val mapStreets: Boolean = false
+        val mapStreets: Boolean = false,
+        /** AR map: the grey streets as their edge lines only, instead of filled (owner option). */
+        val mapEdges: Boolean = false,
+        /**
+         * Next maneuver (icon, distance, street, lanes) only from this many metres; further away
+         * just the trip line. 0 = always (see [SHOW_TURN_FROM_OPTIONS]).
+         */
+        val showTurnFromM: Int = 0
     ) {
         val active: Boolean get() = layout != Layout.ORIGINAL
 
@@ -792,6 +803,13 @@ object HudOverlayModel {
         fun withGauges(layout: Layout, g: Gauges): Config =
             if (layout == Layout.AR) copy(arGauges = g) else copy(navGauges = g)
     }
+
+    /** Choices for [Config.showTurnFromM]: always, then 200 m .. 1 km. */
+    val SHOW_TURN_FROM_OPTIONS = listOf(0, 200, 300, 500, 1000)
+
+    /** True when [config] hides a maneuver [meters] away (unknown distance: shown). */
+    fun turnHidden(config: Config, meters: Int?): Boolean =
+        config.showTurnFromM > 0 && meters != null && meters > config.showTurnFromM
 
     /**
      * Android Auto sends a new maneuver (code 10) before its distance (code 11), so for a moment
@@ -828,6 +846,7 @@ object HudOverlayModel {
         val lanes = d.lanes.map { laneArrows(it) }
         val meters = distanceMeters(d.distance, d.distanceM)
         val icon = resolveTurnIcon(d.turn)
+        val hidden = turnHidden(config, meters)
         val exitAngle = if (icon == "ROUNDABOUT") drawableExitAngle(d.turnAngle) else null
         // AR: turns by their bend angle; a roundabout with a known exit gets the 3D ring (angle 0
         // here, the renderer draws it from exitAngle).
@@ -848,7 +867,9 @@ object HudOverlayModel {
             style = style,
             // Last section (owner): the next maneuver is the destination, so the trip totals
             // would only repeat the section's distance; the flag by the distance says it instead.
-            trip = if (config.trip && icon != "DESTINATION") tripLabel(d.remainingM, d.remainingS) else "",
+            // With the maneuver hidden the trip line is all there is, so it stays.
+            trip = if (config.trip && (icon != "DESTINATION" || hidden)) tripLabel(d.remainingM, d.remainingS) else "",
+            turnHidden = hidden,
             arAngle = arAngle.takeIf { style == TbtStyle.AR },
             arMeters = meters?.toFloat().takeIf { style == TbtStyle.AR },
             street = d.street.trim(),
@@ -905,7 +926,8 @@ object HudOverlayModel {
                         // The map's horizon at the top of the HUD (owner: the default, no switch).
                         mapHorizon = HudArArrow.MAP_HORIZON_TOP_Y,
                         mapPending = config.mapStreets && mapPending && streets.isEmpty() && !tbt.dynamicRoundabout,
-                        onRoundabout = onRoundabout && tbt.exitNumber != null
+                        onRoundabout = onRoundabout && tbt.exitNumber != null,
+                        mapEdges = config.mapEdges
                     ),
                     if (config.mapStreets) streets else emptyList()
                 )

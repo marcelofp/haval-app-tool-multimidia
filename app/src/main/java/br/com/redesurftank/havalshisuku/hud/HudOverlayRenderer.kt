@@ -27,6 +27,9 @@ class HudOverlayRenderer {
         const val PREVIEW_PULSE_MS = 190L
         /** Map view roads: soft grey under the blue route. */
         const val MAP_ROAD_ALPHA = 215
+        /** Edge-line roads: stroke width (half of it stays, outside the road) and its alpha. */
+        const val MAP_EDGE_STROKE = 3f
+        const val MAP_EDGE_ALPHA = 255
         const val NATIVE_SPEED_BASELINE = 133f
         val DRIVE = Color.rgb(63, 169, 255)
         val OFF = Color.argb(61, 255, 255, 255)
@@ -164,9 +167,10 @@ class HudOverlayRenderer {
         val f = frame ?: return
         f.tbt?.let { tbt ->
             when (tbt.style) {
-                M.TbtStyle.HERO -> if (f.radar == null) drawHero(canvas, tbt)
-                M.TbtStyle.COMPACT -> if (f.radar == null) drawRow(canvas, tbt, M.COMPACT_TOP).also { drawLanes(canvas, tbt.lanes, M.LANES_TOP) }
-                M.TbtStyle.FAR -> if (f.radar == null) drawRow(canvas, tbt, M.FAR_TOP)
+                // Further than the owner's "show from": only the trip line (drawNavText).
+                M.TbtStyle.HERO -> if (f.radar == null && !tbt.turnHidden) drawHero(canvas, tbt)
+                M.TbtStyle.COMPACT -> if (f.radar == null && !tbt.turnHidden) drawRow(canvas, tbt, M.COMPACT_TOP).also { drawLanes(canvas, tbt.lanes, M.LANES_TOP) }
+                M.TbtStyle.FAR -> if (f.radar == null && !tbt.turnHidden) drawRow(canvas, tbt, M.FAR_TOP)
                 M.TbtStyle.AR -> {
                     // The map stays while the radar card is up. The left column shares that
                     // card's box, so it steps aside until the camera is gone.
@@ -320,7 +324,27 @@ class HudOverlayRenderer {
      * distance and the trip line; compacted round the lane row when there are lanes.
      */
     private fun drawArColumn(canvas: Canvas, tbt: M.Tbt, arcs: Boolean, wideArcs: Boolean) {
-        val lanes = tbt.lanes.isNotEmpty()
+        // Hidden (further than the owner's "show from"): just the trip line, where it sits without lanes.
+        val lanes = tbt.lanes.isNotEmpty() && !tbt.turnHidden
+        if (!tbt.turnHidden) drawArManeuver(canvas, tbt, arcs, wideArcs, lanes)
+        if (tbt.trip.isNotEmpty()) {
+            // Destination flag before the trip line, as in the Navegação layout; the pair is
+            // shrunk together when it would not fit the box.
+            val baseline = if (lanes) M.AR_LANES_TRIP_BASELINE else M.AR_TRIP_BASELINE
+            val wanted = if (lanes) M.AR_LANES_TRIP_SIZE else M.AR_TRIP_SIZE
+            val maxW = M.BOX_RIGHT - M.BOX_LEFT
+            navTripPaint.textSize = wanted
+            val full = wanted * M.TRIP_FLAG_SCALE + M.TRIP_FLAG_GAP + navTripPaint.measureText(tbt.trip)
+            val size = if (full > maxW) wanted * maxW / full else wanted
+            navTripPaint.textSize = size
+            val (flagLeft, textLeft) = M.tripLineLefts(navTripPaint.measureText(tbt.trip), size)
+            drawFlag(canvas, flagLeft, baseline, size * M.TRIP_FLAG_SCALE)
+            canvas.drawText(tbt.trip, textLeft, baseline, navTripPaint)
+        }
+    }
+
+    /** The AR column's maneuver: street (or exit) line, icon + distance, lanes. */
+    private fun drawArManeuver(canvas: Canvas, tbt: M.Tbt, arcs: Boolean, wideArcs: Boolean, lanes: Boolean) {
         // Still far: street and distance smaller, the turn isn't shown yet either.
         val far = HudArArrow.isFar(tbt.arMeters)
         val scale = if (far) M.AR_FAR_TEXT_SCALE else 1f
@@ -367,20 +391,6 @@ class HudOverlayRenderer {
             canvas.drawText(exitMark, x, distanceY, unitPaint)
         }
         if (lanes) drawLanes(canvas, tbt.lanes, M.AR_LANES_TOP)
-        if (tbt.trip.isNotEmpty()) {
-            // Destination flag before the trip line, as in the Navegação layout; the pair is
-            // shrunk together when it would not fit the box.
-            val baseline = if (lanes) M.AR_LANES_TRIP_BASELINE else M.AR_TRIP_BASELINE
-            val wanted = if (lanes) M.AR_LANES_TRIP_SIZE else M.AR_TRIP_SIZE
-            val maxW = M.BOX_RIGHT - M.BOX_LEFT
-            navTripPaint.textSize = wanted
-            val full = wanted * M.TRIP_FLAG_SCALE + M.TRIP_FLAG_GAP + navTripPaint.measureText(tbt.trip)
-            val size = if (full > maxW) wanted * maxW / full else wanted
-            navTripPaint.textSize = size
-            val (flagLeft, textLeft) = M.tripLineLefts(navTripPaint.measureText(tbt.trip), size)
-            drawFlag(canvas, flagLeft, baseline, size * M.TRIP_FLAG_SCALE)
-            canvas.drawText(tbt.trip, textLeft, baseline, navTripPaint)
-        }
     }
 
     // ---- AR layout: power / RPM arcs round the native speed ----
@@ -515,7 +525,20 @@ class HudOverlayRenderer {
             arPaint.alpha = ((if (map) MAP_ROAD_ALPHA else 140) * shape.grayAlpha).toInt().coerceIn(0, 255)
             arPath.reset()
             for (ribbon in shape.gray) addRibbon(ribbon, top)
-            canvas.drawPath(arPath, arPaint)
+            if (map && tbt.mapEdges) {
+                // Edge lines (owner option): stroke every piece, then cut the roads' insides back
+                // out of the layer (nothing else is in it yet). What stays is the outline of all
+                // the roads merged: no lines across the pieces or where two streets meet.
+                arPaint.style = Paint.Style.STROKE
+                arPaint.strokeWidth = MAP_EDGE_STROKE
+                arPaint.strokeJoin = Paint.Join.ROUND
+                arPaint.alpha = (MAP_EDGE_ALPHA * shape.grayAlpha).toInt().coerceIn(0, 255)
+                canvas.drawPath(arPath, arPaint)
+                arPaint.style = Paint.Style.FILL
+                canvas.drawPath(arPath, edgeCutPaint)
+            } else {
+                canvas.drawPath(arPath, arPaint)
+            }
         }
         arPaint.shader = if (map) mapShader(top, blue = true) else shaderFor(blueShaders, top)
         arPaint.alpha = 255
@@ -573,6 +596,11 @@ class HudOverlayRenderer {
         }
 
     private val sideMaskPaint = Paint().apply { xfermode = android.graphics.PorterDuffXfermode(PorterDuff.Mode.DST_IN) }
+    /** Clears the inside of the grey roads in the layer, leaving their stroked edges. */
+    private val edgeCutPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        xfermode = android.graphics.PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
+    }
 
     /** Fades what is already in the layer towards [left] / [right]. Fully kept within [keep] of [centre]. */
     private fun fadeSides(canvas: Canvas, left: Float, right: Float, top: Float, centre: Float, edge: Int, keep: Float) {
@@ -1032,7 +1060,7 @@ fun previewFocusIndex(layout: M.Layout, focus: PreviewFocus): Int {
         PreviewFocus.CHEVRONS -> if (layout == M.Layout.AR) list.indexOf(AR_AT_TURN) else 0
         PreviewFocus.ARROW -> if (layout == M.Layout.AR) list.indexOf(AR_BENDING) else 0
         // The highway exit 2.4 km away is the far one (small arrow).
-        PreviewFocus.FAR -> list.indexOf(HIGHWAY_EXIT).takeIf { it >= 0 } ?: 0
+        PreviewFocus.FAR -> list.indexOf(HIGHWAY_EXIT).takeIf { it >= 0 } ?: list.indexOf(AR_FAR).takeIf { it >= 0 } ?: 0
         // One with the engine running, so both power and RPM show.
         PreviewFocus.GAUGES -> list.indexOfFirst { it.rpmTenths != null }.takeIf { it >= 0 } ?: 0
     }.coerceAtLeast(0)

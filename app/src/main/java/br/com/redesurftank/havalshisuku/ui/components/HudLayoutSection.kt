@@ -329,6 +329,14 @@ private fun HudNavigationSettingsDialog(
                                     config.trip,
                                     enabled = config.navigation
                                 ) { change(config.copy(trip = it)) }
+                                ChoiceRow(
+                                    "Mostrar próxima manobra",
+                                    "A partir de que distância.",
+                                    listOf("Sempre", "200 m", "300 m", "500 m", "1 km"),
+                                    HudOverlayModel.SHOW_TURN_FROM_OPTIONS.indexOf(config.showTurnFromM).coerceAtLeast(0),
+                                    enabled = config.navigation,
+                                    info = "Mais longe que isso, a seta, a distância, a rua e as faixas da próxima manobra ficam ocultas; só a distância e o tempo até o destino continuam. O mapa e a seta da Navegação AR continuam na tela."
+                                ) { change(config.copy(showTurnFromM = HudOverlayModel.SHOW_TURN_FROM_OPTIONS[it]), PreviewFocus.FAR) }
                             }
                             HudSettingsTab.ARROW -> {
                                 ChoiceRow(
@@ -346,6 +354,14 @@ private fun HudNavigationSettingsDialog(
                                     enabled = config.navigation,
                                     info = "Troca as setas pelo mapa: ruas reais em volta do carro em cinza e a rota em azul sobre elas, até onde dá para desenhar. Usa o GPS e o OpenStreetMap (baixado pela internet do celular)."
                                 ) { change(config.copy(mapStreets = it)) }
+                                ChoiceRow(
+                                    "Ruas do mapa",
+                                    "Preenchidas ou só as bordas.",
+                                    listOf("Preenchidas", "Contorno"),
+                                    if (config.mapEdges) 1 else 0,
+                                    enabled = config.navigation && config.mapStreets,
+                                    info = "Preenchidas: as ruas em cinza claro. Contorno: só as linhas das bordas das ruas, deixando o HUD mais limpo e a rota azul em destaque."
+                                ) { change(config.copy(mapEdges = it == 1)) }
                                 OptionRow(
                                     "Setas de aproximação",
                                     "Piscam rumo ao lado da curva, perto dela.",

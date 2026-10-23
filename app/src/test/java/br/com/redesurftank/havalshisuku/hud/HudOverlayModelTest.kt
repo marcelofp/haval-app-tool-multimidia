@@ -352,4 +352,35 @@ class HudOverlayModelTest {
         assertEquals(HudOverlayModel.BOX_CENTER_X, (flagLeft + right) / 2, 0.01f)
         assertEquals(size * HudOverlayModel.TRIP_FLAG_SCALE + HudOverlayModel.TRIP_FLAG_GAP, textLeft - flagLeft, 0.01f)
     }
+
+    @Test
+    fun `show next turn from - hidden further away, trip line stays, always by default`() {
+        val far = Directions(active = true, distance = "650 m", distanceM = 650, turn = "TURN_RIGHT", street = "Av. Paulista", remainingM = 4_800, remainingS = 720)
+        // Default: always shown.
+        assertTrue(!HudOverlayModel.tbtFor(far)!!.turnHidden)
+        val from500 = HudOverlayModel.Config(layout = HudOverlayModel.Layout.NAVIGATION, showTurnFromM = 500)
+        val hidden = HudOverlayModel.tbtFor(far, from500)!!
+        assertTrue(hidden.turnHidden)
+        assertTrue(!HudOverlayModel.showsStreet(hidden))
+        assertTrue(hidden.trip.isNotEmpty())
+        // Inside the distance, and an unknown one: shown.
+        assertTrue(!HudOverlayModel.tbtFor(far.copy(distance = "450 m", distanceM = 450), from500)!!.turnHidden)
+        assertTrue(!HudOverlayModel.turnHidden(from500, null))
+        // AR too.
+        val ar = from500.copy(layout = HudOverlayModel.Layout.AR)
+        assertTrue(HudOverlayModel.frameFor(ar, far, 0, null).tbt!!.turnHidden)
+        // Last section: the trip line has the totals while the destination is hidden.
+        val dest = far.copy(turn = "DESTINATION")
+        assertTrue(HudOverlayModel.tbtFor(dest)!!.trip.isEmpty())
+        assertTrue(HudOverlayModel.tbtFor(dest, from500)!!.trip.isNotEmpty())
+        assertEquals(listOf(0, 200, 300, 500, 1000), HudOverlayModel.SHOW_TURN_FROM_OPTIONS)
+    }
+
+    @Test
+    fun `map edge lines option reaches the AR map frame`() {
+        val ar = HudOverlayModel.Config(layout = HudOverlayModel.Layout.AR, mapStreets = true, mapEdges = true)
+        val d = Directions(active = true, distance = "100 m", distanceM = 100, turn = "TURN_RIGHT")
+        assertTrue(HudOverlayModel.frameFor(ar, d, 0, null).tbt!!.mapEdges)
+        assertTrue(!HudOverlayModel.frameFor(ar.copy(mapEdges = false), d, 0, null).tbt!!.mapEdges)
+    }
 }
