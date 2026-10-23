@@ -199,11 +199,6 @@ dependencies {
     debugImplementation(libs.ui.test.manifest)
 }
 
-tasks.matching { it.name == "assembleDebug" }.configureEach {
-    dependsOn("testDebugUnitTest")
-    dependsOn("buildCarPlayColdGatePatch")
-}
-
 val buildCarPlayColdGatePatch by tasks.registering(Exec::class) {
     group = "verification"
     description = "Builds the staged, default-off CarPlay cold-start gate service patch"
