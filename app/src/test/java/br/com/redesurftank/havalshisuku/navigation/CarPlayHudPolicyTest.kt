@@ -28,6 +28,18 @@ class CarPlayHudPolicyTest {
         assertFalse(policy.snapshot(100).active)
     }
 
+    @Test fun combinedTestCanEnableHudAtomicallyAtCaptureStart() {
+        val policy = CarPlayHudPolicy()
+        policy.begin("capture", enableImmediately = true)
+        assertTrue(policy.enabled)
+        policy.connect("capture", 1)
+        policy.onCarPlay("capture", 1, raw(), 100)
+        assertTrue(policy.snapshot(100).active)
+        policy.end("capture")
+        assertFalse(policy.enabled)
+        assertFalse(policy.snapshot(101).active)
+    }
+
     @Test fun activeCarPlayDisplaysOnlyTextWithoutInventingAAFields() {
         val directions = CarPlayHudPolicy.textDirections(raw())
         assertTrue(directions.active)

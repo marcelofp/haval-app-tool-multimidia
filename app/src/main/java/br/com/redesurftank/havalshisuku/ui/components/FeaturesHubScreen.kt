@@ -95,9 +95,9 @@ private fun FeaturesHome(onOpenScore: () -> Unit, onOpenAmbientLight: () -> Unit
         RadarFeatureCard(onConfigure = onOpenRadar)
 
         FeatureCard(
-            title = "Diagnóstico de navegação CarPlay",
-            description = "Capture orientações do Apple Maps e Waze para validar a navegação no HUD.",
-            status = "Experimental · manual",
+            title = "Teste CarPlay · cluster + HUD",
+            description = "Inicie captura e HUD juntos por 5 minutos com um único botão.",
+            status = "Experimental · 1 toque",
             icon = Icons.Default.Construction,
             enabled = true,
             modifier = Modifier.fillMaxWidth(),

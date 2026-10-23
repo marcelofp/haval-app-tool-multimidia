@@ -12,6 +12,7 @@ import android.os.IInterface
 import android.os.Parcel
 import android.os.SystemClock
 import br.com.redesurftank.havalshisuku.BuildConfig
+import br.com.redesurftank.havalshisuku.diagnostics.ClusterPersistentEventLogger
 import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
@@ -41,9 +42,17 @@ object CarPlayNavigationCapture {
 
     @Synchronized fun start(context: Context) {
         if (current != null) return
-        val capture = Capture(context.applicationContext)
+        val capture = Capture(context.applicationContext, MAX_DURATION_MS, false)
         current = capture
         status = Status(running = true, message = "Preparando captura", session = capture.id)
+        capture.begin()
+    }
+
+    @Synchronized fun startFiveMinuteTest(context: Context) {
+        if (current != null) return
+        val capture = Capture(context.applicationContext, FIVE_MINUTE_TEST_MS, true)
+        current = capture
+        status = Status(running = true, message = "Preparando teste CarPlay de 5 minutos", session = capture.id)
         capture.begin()
     }
 
@@ -66,7 +75,11 @@ object CarPlayNavigationCapture {
         }
     }
 
-    private class Capture(private val context: Context) {
+    private class Capture(
+        private val context: Context,
+        private val maxDurationMs: Long,
+        private val enableHudImmediately: Boolean
+    ) {
         val id: String = UUID.randomUUID().toString()
         private val thread = HandlerThread("carplay-guidance-capture").apply { start() }
         private val worker = Handler(thread.looper)
@@ -79,12 +92,19 @@ object CarPlayNavigationCapture {
         private var nextBindMs = 0L
         private var failures = 0
         private var ended = false
+        private var restoreClusterCaptureTo: Boolean? = null
+        private val durationTimeout = Runnable {
+            if (gate.isOpen() && !ended) terminate(
+                if (maxDurationMs == FIVE_MINUTE_TEST_MS) "Teste encerrado automaticamente após 5 minutos"
+                else "Captura encerrada após 60 minutos"
+            )
+        }
         private val tick = object : Runnable {
             override fun run() {
                 if (!gate.isOpen() || ended) return
                 val now = SystemClock.elapsedRealtime()
-                if (now - startedAtMs >= MAX_DURATION_MS) {
-                    terminate("Captura encerrada após 60 minutos")
+                if (now - startedAtMs >= maxDurationMs) {
+                    durationTimeout.run()
                     return
                 }
                 val active = binding
@@ -113,9 +133,20 @@ object CarPlayNavigationCapture {
                     startedAtMs = SystemClock.elapsedRealtime()
                     view = view.copy(startedAtMs = startedAtMs)
                     CarPlayExperimentalHud.start(context)
-                    CarPlayExperimentalHud.begin(id)
+                    if (enableHudImmediately) {
+                        restoreClusterCaptureTo = ClusterPersistentEventLogger.isPersistentCaptureEnabled(context)
+                        ClusterPersistentEventLogger.setPersistentCaptureEnabled(context, true)
+                        ClusterPersistentEventLogger.log(
+                            "carplay_combined_test_start",
+                            mapOf("session" to id, "durationMs" to maxDurationMs, "versionCode" to BuildConfig.VERSION_CODE)
+                        )
+                    }
+                    CarPlayExperimentalHud.begin(id, enableHudImmediately)
                     if (!record("capture_start", JSONObject().put("versionCode", BuildConfig.VERSION_CODE)
-                        .put("versionName", BuildConfig.VERSION_NAME).put("mode", "diagnostic_only"))) return@post
+                        .put("versionName", BuildConfig.VERSION_NAME)
+                        .put("mode", if (enableHudImmediately) "five_minute_combined_test" else "diagnostic_only")
+                        .put("automaticHud", enableHudImmediately)
+                        .put("maximumDurationMs", maxDurationMs))) return@post
                     val checks = CarPlayGuidanceParcel.selfTest()
                     if (!record("parcel_selftest_pass", JSONObject().put("checks", checks))) return@post
                     for (packageName in listOf(SERVICE_PACKAGE, "com.ts.carplay.app")) {
@@ -137,7 +168,10 @@ object CarPlayNavigationCapture {
                         }.onFailure { evidence.put("error", it.javaClass.simpleName) }
                         if (!record("installed_package", evidence)) return@post
                     }
-                    if (gate.isOpen()) tick.run()
+                    if (gate.isOpen()) {
+                        worker.postDelayed(durationTimeout, maxDurationMs)
+                        tick.run()
+                    }
                 } catch (error: Exception) {
                     terminate("Falha na preparação: ${error.javaClass.simpleName}")
                 }
@@ -357,9 +391,26 @@ object CarPlayNavigationCapture {
             if (writeEnd) record("capture_stop", captureCounts(stoppedAtMs).put("reason", message))
             if (ended) return
             ended = true
+            if (enableHudImmediately) {
+                ClusterPersistentEventLogger.log(
+                    "carplay_combined_test_stop",
+                    mapOf(
+                        "session" to id,
+                        "reason" to message,
+                        "callbacks" to view.callbacks,
+                        "errors" to view.errors,
+                        "dropped" to gate.dropped
+                    )
+                )
+                restoreClusterCaptureTo?.let {
+                    ClusterPersistentEventLogger.setPersistentCaptureEnabled(context, it)
+                }
+                restoreClusterCaptureTo = null
+            }
             CarPlayExperimentalHud.end(id)
             gate.close()
             worker.removeCallbacks(tick)
+            worker.removeCallbacks(durationTimeout)
             binding?.let { release(it) }
             finished(this, view.copy(running = false, connected = false, message = message, dropped = gate.dropped,
                 stoppedAtMs = stoppedAtMs))
@@ -368,6 +419,7 @@ object CarPlayNavigationCapture {
     }
 
     private const val MAX_DURATION_MS = 60 * 60_000L
+    const val FIVE_MINUTE_TEST_MS = 5 * 60_000L
     private const val SERVICE_PACKAGE = "com.ts.carplay"
     private const val SERVICE_CLASS = "com.ts.carplay.CarPlayService"
     private const val SERVICE_DESCRIPTOR = "com.ts.carplay.common.aidl.ICarPlayService"
