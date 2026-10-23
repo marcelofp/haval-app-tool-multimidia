@@ -306,26 +306,27 @@ class ColdPassthroughController:
 
     def _wait_new_pid(self, old_pid: str, deadline: float) -> int:
         old = set(re.findall(r"\d+", old_pid))
-        while time.monotonic() < deadline:
+        auto_restart_deadline = min(deadline, time.monotonic() + 1.5)
+        while time.monotonic() < auto_restart_deadline:
             result = self.remote.run(f"printf 'impulse_pid='; pidof {OEM_PROCESS} || true", check=False)
-            match = re.search(r"impulse_pid=([0-9 ]*)", result)
-            candidates = [int(value) for value in re.findall(r"\d+", match.group(1) if match else "")]
+            matches = re.findall(r"(?m)^impulse_pid=([0-9 ]*)$", result)
+            candidates = [int(value) for value in re.findall(r"\d+", matches[-1] if matches else "")]
             for candidate in candidates:
                 if str(candidate) not in old:
                     return candidate
             time.sleep(0.1)
         # Rule 40 allows starting the service only when the process is absent.
         probe = self.remote.run(f"printf 'impulse_pid='; pidof {OEM_PROCESS} || true", check=False)
-        match = re.search(r"impulse_pid=([0-9 ]*)", probe)
-        if not (match and match.group(1).strip()):
+        matches = re.findall(r"(?m)^impulse_pid=([0-9 ]*)$", probe)
+        if not (matches and matches[-1].strip()):
             self.remote.run(
                 "component=$(printf 'com.ts.carplay/.\\103ar\\120lay\\123ervice'); "
                 "am startservice -n \"$component\" >/dev/null"
             )
         while time.monotonic() < deadline:
             result = self.remote.run(f"printf 'impulse_pid='; pidof {OEM_PROCESS} || true", check=False)
-            match = re.search(r"impulse_pid=([0-9 ]*)", result)
-            for value in re.findall(r"\d+", match.group(1) if match else ""):
+            matches = re.findall(r"(?m)^impulse_pid=([0-9 ]*)$", result)
+            for value in re.findall(r"\d+", matches[-1] if matches else ""):
                 if value not in old:
                     return int(value)
             time.sleep(0.1)
@@ -357,11 +358,13 @@ class ColdPassthroughController:
                 self.remote.run(f"kill -15 {value} 2>/dev/null || true", check=False)
             deadline = time.monotonic() + 8.0
             self.pid = self._wait_new_pid(old_pid, deadline)
-            maps = self.remote.run(
-                f"grep -ei 'libairplay_ts|libcarplaystack|libcoreutils_ts' /proc/{self.pid}/maps || true",
+            maps_status = self.remote.run(
+                f"printf 'maps_loaded='; if grep -qi -e libairplay_ts -e libcarplaystack "
+                f"-e libcoreutils_ts /proc/{self.pid}/maps; then echo yes; else echo no; fi",
                 check=False,
             )
-            if re.search(r"libairplay_ts|libcarplaystack|libcoreutils_ts", maps.lower()):
+            loaded = re.findall(r"(?m)^maps_loaded=(yes|no)$", maps_status)
+            if not loaded or loaded[-1] != "no":
                 raise ControllerError("OEM libraries loaded before injector arming; refusing warm interception")
 
             bridge, interceptor, profile, _ = self.inputs.read()
