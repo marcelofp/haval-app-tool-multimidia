@@ -9,6 +9,15 @@ CarPlay handoff remains separate from an independent clean-map video experiment.
 
 ## Observed blockers
 
+The experimental ingress now carries type/owned UUID through a bounded synchronous
+StartSession scope before Initialize, with exception-contained C callbacks and
+default passthrough. It is not installed into the OEM process. A separate explicit
+observer can correlate this ordering using exact-library profiles; its native
+instrumentation requires parked validation before field use. Mock/host tests do
+not establish actual callback ordering or secondary negotiation on this vehicle.
+The adapter is process-lifetime pinned and requires original targets to remain
+loaded, with callback quiescence before any future hook/module teardown.
+
 The captured stack's _getScreenDisplays calls MainScreen functions, not AltScreen
 functions in that body. JNI forwards one Surface through ANativeWindow and
 setCarPlayPlatform to CarPlayScreenInit. The media layer retains a global decoder
