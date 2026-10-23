@@ -102,6 +102,20 @@ contract unchanged; any conflicting experiment needs its own explicit review.
 
 ## Validation
 
+### Mac Mini compile/link result
+
+Source 07567766ab6746a5fcc10ca2dfa64a06463e9915 passed the authorized Mac Mini
+ARM64 CMake configure/build/link and assembleDebug job
+haval-74126-work-07567766ab6746a5-20261023T011011Z-24713 (2m9s).
+Fetched checksums passed. The APK excludes libcarplay_video_bridge.so and shared
+C++ runtime; its existing arm64/armv7/x86/x86_64 native entries remain present.
+It is an internal Debug artifact, not a production-signed OTA or car-test build.
+No new JVM Android suite or actual AMediaCodec execution was performed by that job.
+
+Native host bridge passed ThreadSanitizer as well as ASan/UBSan. Parser and packet
+conversion seeded malformed-input checks and twelve Python tests passed. None
+of these results proves OEM interception, secondary negotiation or clean-map video.
+
 ### Experimental bridge implementation
 
 The portable VideoBridge core and an AndroidSecondaryDecoder backend now exist
