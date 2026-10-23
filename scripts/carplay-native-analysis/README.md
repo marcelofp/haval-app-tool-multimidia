@@ -185,3 +185,54 @@ CARPLAY_PACKET_CONVERTER=/tmp/carplay-packet-converter /tmp/carplay-native-analy
 
 The expanded Python suite has 14 tests with both optional private inputs supplied.
 Neither these tests nor compilation proves a negotiated secondary CarPlay map.
+
+## Independent Surface transport prototype
+
+`CarPlaySurfaceEndpoint.java` lives exclusively in the existing internalDebug
+source set (Debug/leanDebug), without a manifest service, receiver, auto-loading,
+service-manager registration or call site. Release code is untouched. A future
+authorized OEM loader must load this class and native library in the same class
+loader, create the endpoint with one exact producer UID and a fresh cryptographic
+32-byte session token, then deliver that Binder through an authenticated bootstrap.
+No such loader/bootstrap is installed by this change.
+
+The producer sends a Parcelable Surface, positive generation and a remote owner
+Binder. The endpoint enforces UID/token, synchronous protocol, bounded Parcel,
+no trailing data and a single grant. It imports the queue using
+ANativeWindow_fromSurface, retaining its own native reference, and releases only
+the received Java wrapper. Explicit revoke, endpoint close or remote owner death
+retires that grant. A local owner Binder cannot provide remote death notification;
+the UI owner must also revoke before its Surface is destroyed, hidden or replaced.
+No lease renewal/TTL or global registry lookup is exposed to remote callers.
+
+`android_surface_transport.cpp` uses a bounded eight-entry, non-reused positive
+handle registry. `surfaceDecoderFactory(handle, explicitTickConverter)` can be
+claimed once; no converter means no factory. Closing removes the handle before
+stopping its associated decoder, outside the registry lock. The portable
+`DecoderLease` serializes submission/revocation and stops only its own codec;
+retired factories/clients cannot reopen it. It must not call back into itself.
+
+The caller must create a fresh independent consumer/Surface on the intended
+display. Neither different Java/native wrapper pointers nor Binder transfer prove
+independence from the principal BufferQueue. This code deliberately does not borrow
+the existing CarPlay Surface, create a Presentation, change resolution, move an
+Activity or negotiate a display. No Binder/Surface/JNI path has run on Android yet.
+The shared library remains excluded from all APKs; invoking this debug endpoint
+without a separately authorized loader fails rather than loading code implicitly.
+
+Portable lease tests (fake decoder, not Android Binder or AMediaCodec):
+
+```sh
+g++ -std=c++17 -Wall -Wextra -Werror -pthread -fsanitize=address,undefined \
+  -fno-omit-frame-pointer -g scripts/carplay-native-analysis/native/decoder_lease.cpp \
+  scripts/carplay-native-analysis/native/decoder_lease_test.cpp -o /tmp/carplay-decoder-lease-test
+timeout 20 /tmp/carplay-decoder-lease-test
+```
+
+Repeat with `-fsanitize=thread` for concurrent revoke/submission isolation. Tests
+cover single claim, early/duplicate revoke, factory null/exception, backend failure,
+client destruction and independent progress while another submission blocks.
+
+API references: [Surface Parcelable/lifetime](https://developer.android.com/reference/android/view/Surface),
+[Binder death](https://developer.android.com/reference/android/os/IBinder.DeathRecipient),
+[native window references](https://developer.android.com/ndk/reference/group/a-native-window).

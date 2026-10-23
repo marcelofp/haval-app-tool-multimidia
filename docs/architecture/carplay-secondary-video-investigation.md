@@ -2,6 +2,37 @@
 
 ## Scope
 
+### Independent Surface and advertisement follow-up
+
+A Debug-only explicit Binder endpoint and native Surface registry now provide the
+transport boundary, without registering a service or loading a library. Single
+grants require exact UID/session token and remote owner death monitoring. Portable
+DecoderLease tests cover immediate secondary retirement and concurrent isolation;
+no real Binder/JNI/AMediaCodec execution is claimed. Queue independence must come
+from a newly created consumer, not pointer inequality or copying the OEM Surface.
+The runtime loader and cluster consumer are still missing.
+
+REA/Ghidra follow-up on the exact captured AirPlay hash confirms
+AirPlayInfoArrayAddAltScreenDisplay at ELF 0x33d70 passes stream type 0x6f (111)
+to AirPlayInfoArrayAddScreenDisplay (0x33ba8). The latter accepts 0x6e/0x6f,
+creates a dictionary, adds common parameters, main/alternate-specific parameters,
+and appends it to the array. DWARF confirms eleven arguments to the alternate API:
+array pointer, CFL UUID, FPS, pixel width/height, physical width/height, optional
+one-byte Boolean pointers for night/limited UI, uint32 limited-UI bits, CFL URL.
+This is evidence for the captured library only, not a negotiated runtime stream.
+
+Private Evidence: ghidra-alt-screen.json
+(ev_02e17d26d30b3e66dd243a897536ed17066d75cbbf89016901188b3e3529397e),
+ghidra-screen-dictionary.json
+(ev_53936f6a01c799a4e24b8123cf587c64f8d104ca82ff17a51c58c290cb1621c1),
+and dwarf-alt-screen-api.json in the private capture directory. Ghidra base is
+0x100000; all addresses above are original ELF virtual addresses.
+
+Do not replace MainScreen with AltScreen or mutate its retained array in place.
+A future advertisement adapter must preserve principal capabilities/ownership,
+append an independently identified secondary only after the codec/Surface route
+is ready, and validate iPhone acceptance. No advertisement patch is installed.
+
 Offline investigation of libraries copied with consent from the test vehicle on
 2026-10-22. The running service loaded ARM64. No Android runtime, AA, HUD, display,
 theme, bridge, OEM APK or library changes are included. Existing full-interface
