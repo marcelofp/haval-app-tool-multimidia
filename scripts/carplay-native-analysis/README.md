@@ -1,5 +1,16 @@
 # Offline CarPlay native audit
 
+## Cold passthrough operator controller — 2026-10-23
+
+`cold_passthrough_controller.py` stages and verifies the reviewed bridge/launcher,
+then can coordinate the bounded cold gate through `armed -> installed-pinned`.
+It refuses active visual CarPlay/Android Auto tasks and never enables AltScreen,
+a secondary decoder, Surface/display-3 routing or SystemUI actions. Details and
+the controlled commands are in
+[carplay-cold-passthrough-controller.md](../../docs/architecture/carplay-cold-passthrough-controller.md).
+The controller itself has not run against the OEM process yet; the vehicle was
+offline during the read-only preflight attempt.
+
 ## Android validation — 2026-10-23
 
 Source9ceda01b passed Mini compile/JVM suite and an actual isolated Android ARM64
