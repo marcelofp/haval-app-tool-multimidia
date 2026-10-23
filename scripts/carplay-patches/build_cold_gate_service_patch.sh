@@ -58,7 +58,9 @@ unsigned="$work_dir/TsCarPlayService-cold-gate-unsigned.apk"
 aligned="$work_dir/TsCarPlayService-cold-gate-aligned.apk"
 verification="$work_dir/verification"
 
-java -jar "$apktool_jar" d -f -o "$decoded" "$base_apk"
+# Only DEX is changed. Keeping resources undecoded also keeps the OEM binary
+# manifest/resources opaque, avoiding a vendor-framework relink.
+java -jar "$apktool_jar" d -r -f -o "$decoded" "$base_apk"
 python3 "$(dirname "$0")/patch_cold_start_gate.py" "$decoded"
 # The OEM APK has no resources.arsc. Apktool cannot relink its decoded manifest
 # against vendor framework attributes, so preserve the authenticated original
