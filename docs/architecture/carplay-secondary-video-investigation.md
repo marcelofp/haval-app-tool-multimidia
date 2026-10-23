@@ -1,5 +1,14 @@
 # CarPlay secondary-video investigation
 
+## Cold initial interception and loaded code validation — 2026-10-23
+
+[COLD_INTERCEPTION.md](../../scripts/carplay-native-analysis/native/COLD_INTERCEPTION.md)
+documents the now-implemented cold Frida installer, full file/RX/body hashes, native
+pre-patching module ownership and conservative rollback. 26 model cases, 15 native
+sanitizer modes and Python 16 passed/1 skip. Not Android compiled or deployed.
+Existing principal processes are refused. Actual early cold startup/passthrough
+and Frida compatibility remain device gates; secondary clean video is unproven.
+
 ## OEM ABI entries and session authorization — 2026-10-23
 
 [OEM_ENTRY_BINDING.md](../../scripts/carplay-native-analysis/native/OEM_ENTRY_BINDING.md)

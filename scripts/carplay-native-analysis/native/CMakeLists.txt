@@ -23,8 +23,9 @@ add_library(carplay_video_bridge SHARED
     hook_permit.cpp
     oem_entry_bridge.cpp
     unix_hook_endpoint.cpp
+    initial_entry_bootstrap.cpp
 )
 target_compile_features(carplay_video_bridge PUBLIC cxx_std_17)
 target_compile_options(carplay_video_bridge PRIVATE -Wall -Wextra -Werror)
 target_include_directories(carplay_video_bridge PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(carplay_video_bridge PUBLIC mediandk android)
+target_link_libraries(carplay_video_bridge PUBLIC mediandk android dl)

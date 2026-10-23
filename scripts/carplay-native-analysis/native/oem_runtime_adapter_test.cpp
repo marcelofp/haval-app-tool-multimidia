@@ -4,6 +4,7 @@
 #include "oem_entry_bridge.h"
 #include "hook_permit.h"
 #include "unix_hook_endpoint.h"
+#include "initial_entry_bootstrap.h"
 
 #include <sys/socket.h>
 #include <unistd.h>
@@ -859,6 +860,25 @@ void realEntryShapeAndSessionCapture() {
     impulse_carplay_entry_finalize(stream(mainKey));
     assert(alive == 0);
 }
+
+void initialBootstrapGuards() {
+    assert(impulse_carplay_initial_bootstrap_abi() == 1);
+    assert(impulse_carplay_initial_bootstrap_state() == 0);
+    assert(impulse_carplay_prepare_initial_entries() == VideoBridge::decoderFailure);
+    assert(impulse_carplay_release_initial_preparation() == 0);
+    assert(impulse_carplay_bootstrap_initial_entries(nullptr, nullptr, nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr, 0) == VideoBridge::rejected);
+    const auto original = originals();
+    assert(impulse_carplay_bootstrap_initial_entries(&original, originalSession, getter,
+        [](observed_abi::String) -> std::int32_t { return 4; },
+        [](observed_abi::String, char*, std::int32_t, std::uint32_t) -> std::uint8_t { return 0; },
+        [](const void* value) { return value; }, [](const void*) {}, "bad/identity", 12) == VideoBridge::rejected);
+    assert(impulse_carplay_bootstrap_initial_entries(&original, originalSession, getter,
+        [](observed_abi::String) -> std::int32_t { return 4; },
+        [](observed_abi::String, char*, std::int32_t, std::uint32_t) -> std::uint8_t { return 0; },
+        [](const void* value) { return value; }, [](const void*) {}, "main", 4) == VideoBridge::notReady);
+    assert(impulse_carplay_initial_bootstrap_state() == 0 && originalInitializes == 0 && originalFrames == 0);
+}
 }
 
 int main(int count, char** arguments) {
@@ -875,6 +895,7 @@ int main(int count, char** arguments) {
     else if (mode == "permit") { permitAuthentication(); }
     else if (mode == "unix-peer") { unixPeerAuthentication(); }
     else if (mode == "entry") { realEntryShapeAndSessionCapture(); }
+    else if (mode == "bootstrap") { initialBootstrapGuards(); }
     else { assert(mode == "legacy" || mode == "race"); legacyAndContestedRegistration(mode == "race"); }
     std::cout << "OEM runtime " << mode << ": C boundary, getter ownership/repeat and registration checks passed\n";
 }

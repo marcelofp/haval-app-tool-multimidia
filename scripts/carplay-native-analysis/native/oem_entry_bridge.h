@@ -21,6 +21,7 @@ private:
 
 bool pinOemEntryBridge(std::unique_ptr<OemEntryBridge> bridge, bool explicitlyEnabled = false);
 observed_abi::VideoCallbacks oemEntryCallbacks();
+bool oemEntryBridgePinned() noexcept;
 
 }
 

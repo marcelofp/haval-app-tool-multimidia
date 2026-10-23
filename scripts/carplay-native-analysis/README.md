@@ -518,9 +518,9 @@ and fake decoders, not actual CoreUtils/OEM execution:
 
 ```sh
 g++ -std=c++17 -Wall -Wextra -Werror -pthread -fsanitize=address,undefined \
-  -fno-omit-frame-pointer -g scripts/carplay-native-analysis/native/{packet_conversion,avc_configuration,video_bridge,oem_ingress,decoder_lease,secondary_advertisement,secondary_session,secondary_runtime,oem_runtime_adapter,hook_installation,coordinated_dispatch,live_session_capture,hook_permit,oem_entry_bridge,unix_hook_endpoint,oem_runtime_adapter_test}.cpp \
-  -o /tmp/carplay-oem-runtime-test
-for mode in off enabled legacy race adopt close-getter install install-fail install-contested dispatch dispatch-install permit entry unix-peer; do
+  -fno-omit-frame-pointer -g scripts/carplay-native-analysis/native/{packet_conversion,avc_configuration,video_bridge,oem_ingress,decoder_lease,secondary_advertisement,secondary_session,secondary_runtime,oem_runtime_adapter,hook_installation,coordinated_dispatch,live_session_capture,hook_permit,oem_entry_bridge,unix_hook_endpoint,initial_entry_bootstrap,oem_runtime_adapter_test}.cpp \
+  -ldl -o /tmp/carplay-oem-runtime-test
+for mode in off enabled legacy race adopt close-getter install install-fail install-contested dispatch dispatch-install permit entry unix-peer bootstrap; do
   timeout 25 /tmp/carplay-oem-runtime-test "$mode" || exit
 done
 ```
@@ -553,3 +553,19 @@ Generate the separate exact-entry binding manifest offline:
 ```
 
 This rejects unknown firmware files and does not access a device or install hooks.
+
+The next-stage [native/COLD_INTERCEPTION.md](native/COLD_INTERCEPTION.md) describes
+the implemented cold-only Frida entry installer and full loaded-code attestation.
+Earlier absent-interceptor notes describe prior source stages. No device deployment
+or Android compilation has been performed for this source.
+
+```sh
+/tmp/carplay-audit/bin/python scripts/carplay-native-analysis/cold_profile.py \
+  "$PRIVATE_CAPTURE_DIRECTORY" > "$PRIVATE_CAPTURE_DIRECTORY/oem-cold-profile.json"
+node scripts/carplay-native-analysis/test_cold_interceptor.js "$PRIVATE_CAPTURE_DIRECTORY"
+```
+
+The Node command runs a fake Frida process using captured file bytes; it does not
+contact the car or perform real ARM64 interception. Actual arming requires the
+trusted expected PID, explicit enable, verified build receipt/hash/staged bridge,
+principal identity and a process observed before all three OEM modules load.

@@ -1,5 +1,10 @@
 # OEM entry bridge, session capture and authenticated request transport
 
+The subsequent [cold interception implementation](COLD_INTERCEPTION.md) now adds
+initial Frida entry replacement, loaded-code attestation and native module pins in
+source. This document's earlier missing-interceptor notes describe the prior stage;
+actual Android/device execution, provisioning and activation remain unvalidated.
+
 ## Current boundary
 
 The source now provides nine noexcept C entry thunks, a process-pinned dispatcher,

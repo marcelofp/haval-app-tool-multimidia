@@ -43,6 +43,7 @@ observed_abi::VideoCallbacks oemEntryCallbacks() {
     return {impulse_carplay_entry_initialize, impulse_carplay_entry_finalize, impulse_carplay_entry_dimensions,
         impulse_carplay_entry_start, impulse_carplay_entry_stop, impulse_carplay_entry_avcc, impulse_carplay_entry_data};
 }
+bool oemEntryBridgePinned() noexcept { return entryBridge.load() != nullptr; }
 }
 
 using namespace carplay_experiment;
