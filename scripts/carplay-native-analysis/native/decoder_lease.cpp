@@ -22,15 +22,16 @@ public:
         return false;
     }
 
-    bool submit(const std::vector<std::uint8_t>& packet, std::uint64_t ticks) override {
+    SubmitResult submit(const std::vector<std::uint8_t>& packet, std::uint64_t ticks) override {
         std::lock_guard<std::mutex> lock(lease_->mutex_);
-        if (lease_->revoked_ || !lease_->decoder_) { return false; }
+        if (lease_->revoked_ || !lease_->decoder_) { return SubmitResult::Fatal; }
         try {
-            if (lease_->decoder_->submit(packet, ticks)) { return true; }
+            const auto result = lease_->decoder_->submit(packet, ticks);
+            if (result != SubmitResult::Fatal) { return result; }
         } catch (...) {
         }
         lease_->retireLocked();
-        return false;
+        return SubmitResult::Fatal;
     }
 
     void stop() noexcept override { lease_->revoke(); }

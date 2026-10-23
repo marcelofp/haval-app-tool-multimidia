@@ -129,7 +129,7 @@ class Backend final : public SecondaryDecoder {
 public:
     Backend() { ++decoderCreates; }
     bool configure(std::uint32_t, std::uint32_t, const std::vector<std::uint8_t>&) override { return true; }
-    bool submit(const std::vector<std::uint8_t>&, std::uint64_t) override { return true; }
+    SubmitResult submit(const std::vector<std::uint8_t>&, std::uint64_t) override { return SubmitResult::Accepted; }
     void stop() noexcept override { ++decoderStops; }
 };
 

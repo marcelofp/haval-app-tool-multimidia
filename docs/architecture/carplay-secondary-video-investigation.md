@@ -239,6 +239,18 @@ resolution or issue focus/restart commands just to test a flag. No OTA is warran
 until the native integration and rollback gates are met. Keep the regression
 contract unchanged; any conflicting experiment needs its own explicit review.
 
+## Field evidence required for the next version
+
+Record the exact app version and keep these observations distinct: secondary display
+advertisement accepted by the phone; secondary Start/configuration callbacks accepted;
+actual frame callbacks on the second stream; first rendered frame on display 3; and
+uninterrupted principal CarPlay output. Navigation callbacks, HUD distance and a
+five-minute capture do not prove secondary video or long-sleep recovery.
+
+Repeat disconnect/reconnect, a real long sleep/wake cycle and a switch to Android Auto.
+Verify independent secondary cleanup, AA priority and no impact to the principal screen.
+Share only anonymized counters/timestamps and redact route, location and device identity.
+
 ## Validation
 
 ### Mac Mini compile/link result
@@ -267,6 +279,12 @@ fallback to OEM after failure. Routes remain fixed until finalization.
 The Android backend owns one codec and ANativeWindow reference per instance,
 drains output on its own worker and requires an explicit clock converter. The
 avcC parser supplies Annex-B CSD-0/CSD-1 without guessing extension formats.
+Input-buffer dequeue distinguishes MediaCodec backpressure from fatal decoder failure:
+`AMEDIACODEC_INFO_TRY_AGAIN_LATER` keeps the same stream generation and decoder lease
+alive, while other negative results still retire it. Because the OEM callback is
+synchronous and has no retry contract, the transient packet is currently dropped;
+real recovery still requires observing a later keyframe and rendered frame rather than
+treating a retained generation as video success.
 This follows Android's documented SPS/PPS format:
 https://developer.android.com/reference/android/media/MediaCodec#CSD.
 Packet/configuration conversion is independent code, not copied FFmpeg source.

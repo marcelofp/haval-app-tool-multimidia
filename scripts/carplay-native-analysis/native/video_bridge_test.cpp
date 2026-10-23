@@ -62,7 +62,7 @@ struct DecoderState {
     int stops = 0;
     int destroys = 0;
     bool configureResult = true;
-    bool submitResult = true;
+    SecondaryDecoder::SubmitResult submitResult = SecondaryDecoder::SubmitResult::Accepted;
     bool throwOnSubmit = false;
     bool holdSubmit = false;
     bool enteredSubmit = false;
@@ -80,7 +80,7 @@ public:
         ++state_.configures;
         return state_.configureResult;
     }
-    bool submit(const std::vector<std::uint8_t>& bytes, std::uint64_t ticks) override {
+    SubmitResult submit(const std::vector<std::uint8_t>& bytes, std::uint64_t ticks) override {
         if (state_.throwOnSubmit) {
             throw std::runtime_error("synthetic decoder failure");
         }
@@ -185,7 +185,7 @@ int main() {
         VideoBridge bridge(callbacks(), config, factory(decoder));
         ready(bridge, secondaryStream, config);
         if (failure == 0) {
-            decoder.submitResult = false;
+            decoder.submitResult = SecondaryDecoder::SubmitResult::Fatal;
             require(bridge.processData(secondaryStream, packet.data(), packet.size(), 0, nullptr, nullptr, nullptr) == VideoBridge::decoderFailure);
         } else if (failure == 1) {
             require(bridge.processData(secondaryStream, packet.data(), 1, 0, nullptr, nullptr, nullptr) == VideoBridge::invalidInput);
@@ -200,6 +200,18 @@ int main() {
         bridge.finalize(secondaryStream);
         require(decoder.stops == 1 && decoder.destroys == 1);
         require(original.initialize == 0 && original.frames == 0 && original.stop == 0);
+    }
+    {
+        DecoderState decoder;
+        VideoBridge bridge(callbacks(), config, factory(decoder));
+        ready(bridge, secondaryStream, config);
+        decoder.submitResult = SecondaryDecoder::SubmitResult::Retryable;
+        require(bridge.processData(secondaryStream, packet.data(), packet.size(), 0, nullptr, nullptr, nullptr) == 0);
+        require(decoder.stops == 0 && decoder.destroys == 0);
+        decoder.submitResult = SecondaryDecoder::SubmitResult::Accepted;
+        require(bridge.processData(secondaryStream, packet.data(), packet.size(), 1, nullptr, nullptr, nullptr) == 0);
+        bridge.finalize(secondaryStream);
+        require(decoder.frames == 2 && decoder.stops == 1 && decoder.destroys == 1);
     }
     {
         DecoderState decoder;

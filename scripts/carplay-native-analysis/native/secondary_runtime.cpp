@@ -17,8 +17,8 @@ public:
     bool configure(std::uint32_t width, std::uint32_t height, const std::vector<std::uint8_t>& avcc) override {
         return decoder_ && width == width_ && height == height_ && decoder_->configure(width, height, avcc);
     }
-    bool submit(const std::vector<std::uint8_t>& bytes, std::uint64_t ticks) override {
-        return decoder_ && decoder_->submit(bytes, ticks);
+    SubmitResult submit(const std::vector<std::uint8_t>& bytes, std::uint64_t ticks) override {
+        return decoder_ ? decoder_->submit(bytes, ticks) : SubmitResult::Fatal;
     }
     void stop() noexcept override {
         if (decoder_) { decoder_->stop(); decoder_.reset(); }

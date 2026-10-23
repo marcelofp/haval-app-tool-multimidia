@@ -68,31 +68,35 @@ bool AndroidSecondaryDecoder::configure(std::uint32_t width, std::uint32_t heigh
     return true;
 }
 
-bool AndroidSecondaryDecoder::submit(const std::vector<std::uint8_t>& annexB, std::uint64_t ticks) {
+SecondaryDecoder::SubmitResult AndroidSecondaryDecoder::submit(
+    const std::vector<std::uint8_t>& annexB, std::uint64_t ticks) {
     if (!running_.load() || failed_.load() || !codec_ || annexB.empty()) {
-        return false;
+        return SubmitResult::Fatal;
     }
     const auto timestamp = tickConverter_(ticks);
     if (!timestamp || *timestamp < 0 || (hasTimestamp_ && *timestamp < lastTimestamp_)) {
-        return false;
+        return SubmitResult::Fatal;
     }
     const auto index = AMediaCodec_dequeueInputBuffer(codec_, 2000);
+    if (index == AMEDIACODEC_INFO_TRY_AGAIN_LATER) {
+        return SubmitResult::Retryable;
+    }
     if (index < 0) {
-        return false;
+        return SubmitResult::Fatal;
     }
     std::size_t capacity = 0;
     auto* buffer = AMediaCodec_getInputBuffer(codec_, static_cast<std::size_t>(index), &capacity);
     if (!buffer || capacity < annexB.size()) {
-        return false;
+        return SubmitResult::Fatal;
     }
     std::memcpy(buffer, annexB.data(), annexB.size());
     if (AMediaCodec_queueInputBuffer(codec_, static_cast<std::size_t>(index), 0,
                                     annexB.size(), static_cast<std::uint64_t>(*timestamp), 0) != AMEDIA_OK) {
-        return false;
+        return SubmitResult::Fatal;
     }
     hasTimestamp_ = true;
     lastTimestamp_ = *timestamp;
-    return !failed_.load();
+    return failed_.load() ? SubmitResult::Fatal : SubmitResult::Accepted;
 }
 
 void AndroidSecondaryDecoder::drain() noexcept {

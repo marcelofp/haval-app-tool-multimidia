@@ -112,6 +112,7 @@ object CarPlayNavigationCapture {
                     view = view.copy(directory = directory.absolutePath)
                     startedAtMs = SystemClock.elapsedRealtime()
                     view = view.copy(startedAtMs = startedAtMs)
+                    CarPlayExperimentalHud.start(context)
                     CarPlayExperimentalHud.begin(id)
                     if (!record("capture_start", JSONObject().put("versionCode", BuildConfig.VERSION_CODE)
                         .put("versionName", BuildConfig.VERSION_NAME).put("mode", "diagnostic_only"))) return@post

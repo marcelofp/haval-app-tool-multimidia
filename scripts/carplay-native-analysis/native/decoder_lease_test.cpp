@@ -13,6 +13,7 @@ struct State {
     int destroyed = 0;
     int submitted = 0;
     bool fail = false;
+    bool retryable = false;
     bool throws = false;
     std::mutex mutex;
     std::condition_variable changed;
@@ -29,14 +30,16 @@ public:
         if (state_->throws) { throw std::runtime_error("synthetic configure failure"); }
         return !state_->fail;
     }
-    bool submit(const std::vector<std::uint8_t>&, std::uint64_t) override {
+    SubmitResult submit(const std::vector<std::uint8_t>&, std::uint64_t) override {
         std::unique_lock<std::mutex> lock(state_->mutex);
         ++state_->submitted;
         state_->entered = true;
         state_->changed.notify_all();
         if (state_->block) { state_->changed.wait(lock, [this] { return state_->released; }); }
         if (state_->throws) { throw std::runtime_error("synthetic submit failure"); }
-        return !state_->fail;
+        if (state_->fail) return SubmitResult::Fatal;
+        if (state_->retryable) return SubmitResult::Retryable;
+        return SubmitResult::Accepted;
     }
     void stop() noexcept override { ++state_->stopped; }
 private:
@@ -55,11 +58,11 @@ int main() {
     assert(lease->active());
     assert(client && !lease->claim());
     assert(client->configure(640, 480, {}));
-    assert(client->submit({1}, 1));
+    assert(client->submit({1}, 1) == SecondaryDecoder::SubmitResult::Accepted);
     lease->revoke();
     assert(!lease->active());
     lease->revoke();
-    assert(!client->submit({1}, 2) && !client->configure(640, 480, {}));
+    assert(client->submit({1}, 2) == SecondaryDecoder::SubmitResult::Fatal && !client->configure(640, 480, {}));
     client.reset();
     assert(state->stopped == 1 && state->destroyed == 1);
 
@@ -77,9 +80,20 @@ int main() {
         auto submitClient = submitLease->claim();
         submitState->fail = true;
         submitState->throws = throwing;
-        assert(!submitClient->submit({1}, 1));
+        assert(submitClient->submit({1}, 1) == SecondaryDecoder::SubmitResult::Fatal);
         assert(submitState->stopped == 1 && submitState->destroyed == 1);
     }
+
+    auto retryState = std::make_shared<State>();
+    retryState->retryable = true;
+    auto retryLease = makeLease(retryState);
+    auto retryClient = retryLease->claim();
+    assert(retryClient->submit({1}, 1) == SecondaryDecoder::SubmitResult::Retryable);
+    assert(retryLease->active() && retryState->stopped == 0 && retryState->destroyed == 0);
+    retryState->retryable = false;
+    assert(retryClient->submit({1}, 2) == SecondaryDecoder::SubmitResult::Accepted);
+    retryClient.reset();
+    assert(retryState->stopped == 1 && retryState->destroyed == 1);
 
     auto empty = std::make_shared<DecoderLease>([] { return std::unique_ptr<SecondaryDecoder>{}; });
     assert(!empty->claim() && !empty->claim());
@@ -110,15 +124,15 @@ int main() {
     auto stopped = std::async(std::launch::async, [&] { revoking.set_value(); blocked->revoke(); });
     revoking.get_future().wait();
     assert(stopped.wait_for(std::chrono::milliseconds(20)) == std::future_status::timeout);
-    assert(independentClient->submit({1}, 1));
+    assert(independentClient->submit({1}, 1) == SecondaryDecoder::SubmitResult::Accepted);
     {
         std::lock_guard<std::mutex> lock(blockedState->mutex);
         blockedState->released = true;
         blockedState->changed.notify_all();
     }
-    assert(sending.get());
+    assert(sending.get() == SecondaryDecoder::SubmitResult::Accepted);
     stopped.get();
-    assert(!blockedClient->submit({1}, 2));
+    assert(blockedClient->submit({1}, 2) == SecondaryDecoder::SubmitResult::Fatal);
     assert(blockedState->stopped == 1 && independentState->stopped == 0);
     independentClient.reset();
     assert(independentState->stopped == 1);

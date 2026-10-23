@@ -111,6 +111,11 @@ fail closed without touching OEM. Identity is type+UUID, not arrival order.
 The secondary gets its own decoder from a factory. Stream routes never change on
 failure or shutdown; late secondary data cannot fall back into OEM. Configuration
 and frame sizes are bounded. Raw input is copied and validated before submission.
+MediaCodec input-buffer `TRY_AGAIN_LATER` is transient: it retains the generation and
+decoder lease instead of converting two milliseconds of backpressure into teardown.
+The synchronous bridge cannot retry that packet, so field validation must separately
+prove later frame/keyframe recovery and display-3 rendering. Other dequeue failures
+remain fatal and retire only the secondary route.
 Secondary shutdown waits for an in-flight submission, stops/destroys only that
 decoder and leaves principal delivery independent. Finalize releases the route.
 The adapter must quiesce callbacks before reusing a stream address or destroying

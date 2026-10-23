@@ -13,6 +13,7 @@ class CarPlayHudPolicyTest {
         begin("capture")
         connect("capture", 1)
         setEnabled(true)
+        onAndroidAutoAvailability(false, 100)
     }
 
     @Test fun defaultIsDisabledAndRequiresCapture() {
@@ -101,6 +102,38 @@ class CarPlayHudPolicyTest {
         policy.onAndroidAuto(AndroidAutoNavigationTelemetry.inactive())
         assertEquals("Via de teste", policy.snapshot(200).street)
         assertFalse(policy.snapshot(5_100).active)
+    }
+
+    @Test fun unknownActiveStaleAndFutureAndroidAutoAvailabilityFailClosed() {
+        val policy = CarPlayHudPolicy().apply {
+            begin("capture")
+            connect("capture", 1)
+            setEnabled(true)
+            onCarPlay("capture", 1, raw(), 100)
+        }
+        assertFalse(policy.snapshot(100).active)
+        policy.onAndroidAutoAvailability(true, 100)
+        assertFalse(policy.snapshot(100).active)
+        policy.onAndroidAutoAvailability(false, 101)
+        assertTrue(policy.snapshot(101).active)
+        assertFalse(policy.snapshot(5_101).active)
+        policy.onAndroidAutoAvailability(false, 6_000)
+        assertFalse(policy.snapshot(5_999).active)
+    }
+
+    @Test fun androidAutoObservationExpiryCanClearBeforeCarPlayDataExpiry() {
+        val policy = enabledPolicy()
+        policy.onCarPlay("capture", 1, raw(), 1_000)
+        assertTrue(policy.snapshot(5_099).active)
+        assertFalse(policy.snapshot(5_100).active)
+        assertEquals(5_100L, policy.nextExpiryMs())
+    }
+
+    @Test fun recomputingAfterLongSleepClearsExpiredGuidanceImmediately() {
+        val policy = enabledPolicy()
+        policy.onCarPlay("capture", 1, raw(), 100)
+        assertTrue(policy.snapshot(100).active)
+        assertFalse(policy.snapshot(60_000).active)
     }
 
     @Test fun expiryBoundaryAndFutureTimestampFailClosed() {

@@ -1,18 +1,40 @@
 package br.com.redesurftank.havalshisuku.navigation
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import br.com.redesurftank.havalshisuku.hud.HudOverlayController
 import br.com.redesurftank.havalshisuku.managers.AndroidAutoNavigationTelemetry
+import java.util.concurrent.atomic.AtomicBoolean
 
 object CarPlayExperimentalHud {
     private val main = Handler(Looper.getMainLooper())
     private val policy = CarPlayHudPolicy()
+    private val started = AtomicBoolean(false)
     private var published = AndroidAutoNavigationTelemetry.inactive()
     @Volatile var enabled = false
         private set
     private val expire = Runnable { publish() }
+    private val wakeReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == Intent.ACTION_SCREEN_ON) change { }
+        }
+    }
+
+    fun start(context: Context) {
+        if (!started.compareAndSet(false, true)) return
+        runCatching {
+            context.applicationContext.registerReceiver(wakeReceiver, IntentFilter(Intent.ACTION_SCREEN_ON))
+        }.onFailure {
+            started.set(false)
+            Log.e(TAG, "Unable to register HUD wake revalidation", it)
+        }
+    }
 
     fun begin(id: String) = change { policy.begin(id) }
 
@@ -27,6 +49,10 @@ object CarPlayExperimentalHud {
     fun onAndroidAuto(directions: AndroidAutoNavigationTelemetry.Directions) {
         val frozen = directions.copy(lanes = directions.lanes.map { it.toList() })
         change(forwardUnchanged = true) { policy.onAndroidAuto(frozen) }
+    }
+
+    fun onAndroidAutoAvailability(active: Boolean, observedAtMs: Long) {
+        change { policy.onAndroidAutoAvailability(active, observedAtMs) }
     }
 
     fun onCarPlay(id: String, generation: Long, raw: RawCarPlayGuidance?, receivedAtMs: Long) {
@@ -54,4 +80,6 @@ object CarPlayExperimentalHud {
         published = next
         HudOverlayController.onDirections(next)
     }
+
+    private const val TAG = "CarPlayExperimentalHud"
 }

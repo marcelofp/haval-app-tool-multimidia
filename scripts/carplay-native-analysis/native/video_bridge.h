@@ -30,10 +30,12 @@ struct BridgeConfig {
 
 class SecondaryDecoder {
 public:
+    enum class SubmitResult { Accepted, Retryable, Fatal };
+
     virtual ~SecondaryDecoder() = default;
     virtual bool configure(std::uint32_t width, std::uint32_t height,
                            const std::vector<std::uint8_t>& avcc) = 0;
-    virtual bool submit(const std::vector<std::uint8_t>& annexB, std::uint64_t ticks) = 0;
+    virtual SubmitResult submit(const std::vector<std::uint8_t>& annexB, std::uint64_t ticks) = 0;
     virtual void stop() noexcept = 0;
 };
 

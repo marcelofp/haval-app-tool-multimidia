@@ -10,6 +10,8 @@ class CarPlayHudPolicy {
     private var receivedAtMs: Long? = null
     private var carPlay = AndroidAutoNavigationTelemetry.inactive()
     private var androidAuto = AndroidAutoNavigationTelemetry.inactive()
+    private var androidAutoAvailable: Boolean? = null
+    private var androidAutoObservedAtMs: Long? = null
 
     fun begin(id: String) {
         capture = id
@@ -47,6 +49,11 @@ class CarPlayHudPolicy {
         androidAuto = directions.copy(lanes = directions.lanes.map { it.toList() })
     }
 
+    fun onAndroidAutoAvailability(active: Boolean, observedAtMs: Long) {
+        androidAutoAvailable = active
+        androidAutoObservedAtMs = observedAtMs
+    }
+
     fun onCarPlay(id: String, number: Long, raw: RawCarPlayGuidance?, nowMs: Long) {
         if (!enabled || capture != id || generation != number) return
         receivedAtMs = nowMs
@@ -55,13 +62,25 @@ class CarPlayHudPolicy {
 
     fun snapshot(nowMs: Long): AndroidAutoNavigationTelemetry.Directions {
         if (androidAuto.active) return androidAuto
+        if (!hasFreshInactiveAndroidAutoObservation(nowMs)) {
+            return AndroidAutoNavigationTelemetry.inactive()
+        }
         val received = receivedAtMs ?: return AndroidAutoNavigationTelemetry.inactive()
         return if (enabled && generation != null && nowMs >= received && nowMs - received < FRESHNESS_MS) carPlay
         else AndroidAutoNavigationTelemetry.inactive()
     }
 
-    fun nextExpiryMs(): Long? = receivedAtMs?.takeIf { enabled && generation != null && carPlay.active }
-        ?.let { it + FRESHNESS_MS }
+    fun nextExpiryMs(): Long? {
+        val received = receivedAtMs?.takeIf { enabled && generation != null && carPlay.active } ?: return null
+        val observed = androidAutoObservedAtMs?.takeIf { androidAutoAvailable == false } ?: return null
+        return minOf(received + FRESHNESS_MS, observed + ANDROID_AUTO_OBSERVATION_FRESHNESS_MS)
+    }
+
+    private fun hasFreshInactiveAndroidAutoObservation(nowMs: Long): Boolean {
+        val observed = androidAutoObservedAtMs ?: return false
+        val age = nowMs - observed
+        return androidAutoAvailable == false && age >= 0L && age < ANDROID_AUTO_OBSERVATION_FRESHNESS_MS
+    }
 
     private fun clearCarPlay() {
         carPlay = AndroidAutoNavigationTelemetry.inactive()
@@ -70,6 +89,7 @@ class CarPlayHudPolicy {
 
     companion object {
         const val FRESHNESS_MS = 5_000L
+        const val ANDROID_AUTO_OBSERVATION_FRESHNESS_MS = 5_000L
 
         fun textDirections(raw: RawCarPlayGuidance?): AndroidAutoNavigationTelemetry.Directions {
             if (raw == null || raw.routeGuidanceState != CarPlayRouteGuidanceState.ROUTE_SET) {

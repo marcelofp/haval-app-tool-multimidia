@@ -76,12 +76,12 @@ public:
         ++state_->configured;
         return true;
     }
-    bool submit(const std::vector<std::uint8_t>& bytes, std::uint64_t ticks) override {
+    SubmitResult submit(const std::vector<std::uint8_t>& bytes, std::uint64_t ticks) override {
         assert((bytes == std::vector<std::uint8_t>{0, 0, 0, 1, 0x65, 0x88}));
         assert(ticks == 1234);
         if (state_->submitGate) { state_->submitGate->block(); }
         ++state_->frames;
-        return true;
+        return SubmitResult::Accepted;
     }
     void stop() noexcept override { ++state_->stopped; }
 private:

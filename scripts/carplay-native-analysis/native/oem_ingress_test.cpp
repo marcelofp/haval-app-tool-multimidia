@@ -43,7 +43,10 @@ static std::uint8_t copy(observed_abi::String value, char* output, std::int32_t 
 class Decoder final : public SecondaryDecoder {
 public:
     bool configure(std::uint32_t, std::uint32_t, const std::vector<std::uint8_t>&) override { return true; }
-    bool submit(const std::vector<std::uint8_t>&, std::uint64_t) override { ++decoderFrames; return true; }
+    SubmitResult submit(const std::vector<std::uint8_t>&, std::uint64_t) override {
+        ++decoderFrames;
+        return SubmitResult::Accepted;
+    }
     void stop() noexcept override { ++decoderStops; }
 };
 

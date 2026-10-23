@@ -282,7 +282,13 @@ VideoBridge::Status VideoBridge::processData(Stream stream, const std::uint8_t* 
             retire(*record);
             return invalidInput;
         }
-        if (!record->decoder->submit(packet.bytes, ticks)) {
+        const auto submitted = record->decoder->submit(packet.bytes, ticks);
+        if (submitted == SecondaryDecoder::SubmitResult::Retryable) {
+            // MediaCodec backpressure is transient. Keep this generation alive; the
+            // secondary path may lose this packet but must not tear down the OEM stream.
+            return 0;
+        }
+        if (submitted == SecondaryDecoder::SubmitResult::Fatal) {
             retire(*record);
             return decoderFailure;
         }

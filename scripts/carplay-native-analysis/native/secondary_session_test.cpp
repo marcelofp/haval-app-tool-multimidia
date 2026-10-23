@@ -45,7 +45,7 @@ class Backend final : public SecondaryDecoder {
 public:
     explicit Backend(std::shared_ptr<DecoderState> state) : state_(std::move(state)) {}
     bool configure(std::uint32_t, std::uint32_t, const std::vector<std::uint8_t>&) override { return false; }
-    bool submit(const std::vector<std::uint8_t>&, std::uint64_t) override { return true; }
+    SubmitResult submit(const std::vector<std::uint8_t>&, std::uint64_t) override { return SubmitResult::Accepted; }
     void stop() noexcept override {
         if (state_->stopGate) { state_->stopGate->block(); }
         ++state_->stopped;
@@ -130,7 +130,7 @@ void disabledAndSinglePublication() {
     assert(session.advertise(generation, &original, configuration(), api(), publish, &output) != 0);
     assert(session.revoke(generation) && session.revoke(generation));
     assert(!session.active(generation) && state->stopped == 1);
-    assert(!client->submit({1}, 0));
+    assert(client->submit({1}, 0) == SecondaryDecoder::SubmitResult::Fatal);
 }
 
 void revokeDuringPreparationRejectsStaleGeneration() {
@@ -184,7 +184,7 @@ void publicationSerializesEvenDirectLeaseRevoke() {
     directRevoke.get();
     assert(sessionRevoke.get());
     assert(state->stopped == 1 && !session.active(generation));
-    assert(output.array && !client->submit({1}, 0));
+    assert(output.array && client->submit({1}, 0) == SecondaryDecoder::SubmitResult::Fatal);
 }
 
 void duplicateCloseWaitsForResourceRetirement() {

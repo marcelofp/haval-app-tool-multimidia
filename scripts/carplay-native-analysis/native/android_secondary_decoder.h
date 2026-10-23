@@ -18,7 +18,7 @@ public:
     ~AndroidSecondaryDecoder() override;
     bool configure(std::uint32_t width, std::uint32_t height,
                    const std::vector<std::uint8_t>& avcc) override;
-    bool submit(const std::vector<std::uint8_t>& annexB, std::uint64_t ticks) override;
+    SubmitResult submit(const std::vector<std::uint8_t>& annexB, std::uint64_t ticks) override;
     void stop() noexcept override;
 
 private:
