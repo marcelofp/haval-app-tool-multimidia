@@ -41,10 +41,25 @@ fun buildConfigString(value: String): String =
 android {
     namespace = "br.com.redesurftank.havalshisuku"
     compileSdk = 36
+    ndkVersion = "27.1.12297006"
+
+    externalNativeBuild {
+        cmake {
+            path = file("../scripts/carplay-native-analysis/native/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
 
     defaultConfig {
         applicationId = "br.com.redesurftank.havalshisuku"
         minSdk = 28
+        externalNativeBuild {
+            cmake {
+                abiFilters += listOf("arm64-v8a")
+                targets += listOf("carplay_video_bridge")
+                arguments += listOf("-DANDROID_STL=c++_static")
+            }
+        }
         //noinspection ExpiredTargetSdkVersion
         targetSdk = 28
         versionCode = appVersionCode.get()
@@ -138,6 +153,10 @@ android {
         aidl = true
         buildConfig = true
         compose = true
+    }
+
+    packaging {
+        jniLibs.excludes += "**/libcarplay_video_bridge.so"
     }
 }
 
