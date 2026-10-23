@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-A versão 74129 simplifica o ensaio de campo em Recursos > Teste CarPlay · cluster + HUD.
+A versão 74129 simplifica o ensaio de campo em Recursos > Teste CarPlay · captura + HUD.
 Um único botão inicia uma sessão limitada a cinco minutos; durante a sessão, o mesmo botão
 encerra e limpa o teste. Não há mais uma sequência separada para iniciar a captura e ligar o
 HUD.
@@ -15,7 +15,9 @@ HUD.
   `carplay_combined_test_start` e `carplay_combined_test_stop` com o mesmo UUID da captura;
 - temporizador monotônico de cinco minutos, além do encerramento manual.
 
-A configuração anterior do logger persistente do cluster é preservada e restaurada no fim.
+Uma lease em memória mantém o logger do cluster ativo durante a sessão sem alterar a
+preferência persistida do proprietário. Leases são independentes, portanto o fim do teste não
+desabilita outro diagnóstico concorrente nem sobrescreve uma mudança feita durante o percurso.
 Os registros de navegação continuam em armazenamento privado e os eventos do cluster seguem
 o mecanismo existente de retenção. Não há envio automático pela rede.
 

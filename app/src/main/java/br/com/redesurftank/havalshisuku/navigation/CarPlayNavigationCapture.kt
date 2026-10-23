@@ -92,7 +92,7 @@ object CarPlayNavigationCapture {
         private var nextBindMs = 0L
         private var failures = 0
         private var ended = false
-        private var restoreClusterCaptureTo: Boolean? = null
+        private var clusterCaptureLease: AutoCloseable? = null
         private val durationTimeout = Runnable {
             if (gate.isOpen() && !ended) terminate(
                 if (maxDurationMs == FIVE_MINUTE_TEST_MS) "Teste encerrado automaticamente após 5 minutos"
@@ -134,8 +134,7 @@ object CarPlayNavigationCapture {
                     view = view.copy(startedAtMs = startedAtMs)
                     CarPlayExperimentalHud.start(context)
                     if (enableHudImmediately) {
-                        restoreClusterCaptureTo = ClusterPersistentEventLogger.isPersistentCaptureEnabled(context)
-                        ClusterPersistentEventLogger.setPersistentCaptureEnabled(context, true)
+                        clusterCaptureLease = ClusterPersistentEventLogger.acquireCaptureLease("carplay-combined-$id")
                         ClusterPersistentEventLogger.log(
                             "carplay_combined_test_start",
                             mapOf("session" to id, "durationMs" to maxDurationMs, "versionCode" to BuildConfig.VERSION_CODE)
@@ -402,10 +401,8 @@ object CarPlayNavigationCapture {
                         "dropped" to gate.dropped
                     )
                 )
-                restoreClusterCaptureTo?.let {
-                    ClusterPersistentEventLogger.setPersistentCaptureEnabled(context, it)
-                }
-                restoreClusterCaptureTo = null
+                runCatching { clusterCaptureLease?.close() }
+                clusterCaptureLease = null
             }
             CarPlayExperimentalHud.end(id)
             gate.close()

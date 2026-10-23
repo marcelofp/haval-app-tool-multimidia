@@ -44,7 +44,7 @@ fun CarPlayCaptureScreen(onBackToFeatures: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         OutlinedButton(onClick = onBackToFeatures) { Text("Voltar aos recursos") }
-        Text("Diagnóstico de navegação CarPlay", color = AppColors.TextPrimary,
+        Text("Teste CarPlay · captura + HUD", color = AppColors.TextPrimary,
             fontSize = 26.sp, fontWeight = FontWeight.Bold)
         Text("Um toque prepara toda a captura. Depois conecte o CarPlay e faça uma rota no Apple Maps ou Waze.",
             color = AppColors.TextSecondary, fontSize = 18.sp)
@@ -68,8 +68,8 @@ fun CarPlayCaptureScreen(onBackToFeatures: () -> Unit) {
                 Text("• captura dos callbacks de navegação do CarPlay\n" +
                     "• distância e nome da via no HUD nativo, quando disponíveis\n" +
                     "• captura correlacionada dos eventos do cluster durante os mesmos 5 minutos\n\n" +
-                    "A seta continua vazia enquanto os códigos de manobra não forem confirmados. O mapa limpo no cluster não é simulado: " +
-                    "o registro mostrará se a ponte experimental realmente ficou disponível.",
+                    "A seta continua vazia enquanto os códigos de manobra não forem confirmados. Esta 129 não ativa nem simula o mapa limpo: " +
+                    "os logs servirão para construir e validar a próxima etapa da ponte do cluster.",
                     color = AppColors.TextSecondary)
             }
         }

@@ -95,8 +95,8 @@ private fun FeaturesHome(onOpenScore: () -> Unit, onOpenAmbientLight: () -> Unit
         RadarFeatureCard(onConfigure = onOpenRadar)
 
         FeatureCard(
-            title = "Teste CarPlay · cluster + HUD",
-            description = "Inicie captura e HUD juntos por 5 minutos com um único botão.",
+            title = "Teste CarPlay · captura + HUD",
+            description = "Inicie captura, HUD e logs do cluster por 5 minutos com um único botão.",
             status = "Experimental · 1 toque",
             icon = Icons.Default.Construction,
             enabled = true,
