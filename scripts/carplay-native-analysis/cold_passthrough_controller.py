@@ -117,6 +117,14 @@ def shell_quote(value: str) -> str:
     return "'" + value.replace("'", "'\\''") + "'"
 
 
+def shell_octal_command(value: str) -> str:
+    try:
+        payload = value.encode("ascii")
+    except UnicodeEncodeError as error:
+        raise ValueError("remote command must be ASCII") from error
+    return "".join(f"\\{byte:03o}" for byte in payload)
+
+
 class TelnetShell:
     """Small root-shell transport for the head unit's existing Telnet console."""
 
@@ -386,11 +394,10 @@ class ColdPassthroughController:
             print("[cold] launcher specialized", file=sys.stderr, flush=True)
 
             persistent_interceptor = (
-                f"tail -f /dev/null | {REMOTE_INJECTOR} --device=local -i "
-                f"-p {self.pid} -s {REMOTE_LAUNCHER}"
+                f"{REMOTE_INJECTOR} -p {self.pid} -s {REMOTE_LAUNCHER} -R qjs"
             )
             command = (
-                f"nohup setsid sh -c {shell_quote(persistent_interceptor)} "
+                f"nohup setsid sh -c \"$(printf {shell_quote(shell_octal_command(persistent_interceptor))})\" "
                 f"> {REMOTE_LOG} 2>&1 < /dev/null & :"
             )
             self.remote.run(command)
@@ -406,11 +413,10 @@ class ColdPassthroughController:
             if phase != "installed-pinned":
                 raise ControllerError(f"Cold interceptor did not install passthrough (phase={phase}): {log[-1200:]}")
             persistent_endpoint = (
-                f"tail -f /dev/null | {REMOTE_INJECTOR} --device=local -i "
-                f"-p {self.pid} -s {REMOTE_ENDPOINT_LAUNCHER}"
+                f"{REMOTE_INJECTOR} -p {self.pid} -s {REMOTE_ENDPOINT_LAUNCHER} -R qjs"
             )
             self.remote.run(
-                f"nohup setsid sh -c {shell_quote(persistent_endpoint)} "
+                f"nohup setsid sh -c \"$(printf {shell_quote(shell_octal_command(persistent_endpoint))})\" "
                 f"> {REMOTE_ENDPOINT_LOG} 2>&1 < /dev/null & :"
             )
             print("[cold] endpoint launched", file=sys.stderr, flush=True)

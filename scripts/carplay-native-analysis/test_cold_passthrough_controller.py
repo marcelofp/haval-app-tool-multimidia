@@ -7,6 +7,7 @@ from cold_passthrough_controller import (
     classify_injector_log,
     endpoint_launcher,
     launcher_template,
+    shell_octal_command,
     sha256_bytes,
     specialize_launcher,
 )
@@ -50,6 +51,13 @@ class ColdPassthroughControllerTest(unittest.TestCase):
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
             sha256_bytes(b"abc"),
         )
+
+    def test_octal_command_preserves_uppercase_runtime_option(self):
+        encoded = shell_octal_command("fridainjector -R qjs")
+        self.assertEqual("fridainjector -R qjs", bytes(
+            int(value, 8) for value in encoded.split("\\") if value
+        ).decode("ascii"))
+        self.assertNotIn("R", encoded)
 
     def test_endpoint_launcher_arms_exact_staged_bridge(self):
         source = (ROOT / "carplay_clean_map_endpoint.js").read_text(encoding="utf-8")
