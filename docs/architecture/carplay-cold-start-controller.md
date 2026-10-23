@@ -73,11 +73,16 @@ parado. Nenhum passo reinicia SystemUI ou move a Activity entre displays.
 
 ## Estado de build
 
-`build_cold_gate_service_patch.sh` recompila e assina uma cópia do APK OEM no
-Mac Mini, verifica o Apktool 3.0.2 por SHA-256, valida o baseline e decodifica de
-novo o resultado para provar a presença exata do gate. `assembleDebug` produz
-esse APK em `app/build/outputs/carplay-patches/`, mas ele ainda não substitui o
-asset embarcado. Essa separação permite revisar primeiro o artefato staged.
-Como o APK OEM não contém `resources.arsc`, o decode usa `--no-res` e o build
-preserva o manifest binário original (`--copy-original`), substituindo somente o
-DEX recompilado antes da nova assinatura.
+O artefato revisado foi incorporado como
+`app/src/main/assets/carplay_patches/TsCarPlayService.apk`, SHA-256
+`ad019ce091ef55bbf57f7e242ce9cdb647a8596f1e1f7d28d0c7f340957dba01`.
+O gate permanece inerte por padrão. `build_cold_gate_service_patch.sh` aceita
+somente o baseline auditado ou esse artefato exato. Para o asset incorporado,
+ele decodifica de novo, prova semanticamente a chamada e sua ordem, verifica a
+assinatura e gera um recibo byte a byte idêntico. Assim, `assembleDebug` e
+`assembleRelease` não reaplicam nem reassinam o patch já revisado.
+
+O caminho de reconstrução do baseline continua disponível no Mac Mini. Como o
+APK OEM não contém `resources.arsc`, ele usa `--no-res` e preserva o manifest
+binário original (`--copy-original`), substituindo somente o DEX antes da nova
+assinatura.
