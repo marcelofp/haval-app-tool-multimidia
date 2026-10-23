@@ -1,5 +1,13 @@
 # CarPlay secondary-video investigation
 
+## Latest static caller evidence — 2026-10-23
+
+The exact captured getter/caller ownership path is now documented in
+[carplay-getter-ownership.md](carplay-getter-ownership.md). It supports releasing
+the getter-owned original once on successful replacement; the outer OEM delegate
+adds its own retain and must remain unchanged. Live module attestation, quiescent
+installation and hardware negotiation remain unvalidated. No runtime activation.
+
 ## Scope
 
 ### Independent Surface and advertisement follow-up
