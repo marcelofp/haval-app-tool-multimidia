@@ -1,5 +1,13 @@
 # CarPlay secondary-video investigation
 
+## Hook coordination source — 2026-10-23
+
+The inert [HookInstaller](../../scripts/carplay-native-analysis/native/HOOK_INSTALLATION.md)
+now sequences trusted preparation, quiescence, live principal adoption, lifetime
+pinning and atomic publication. Nine synthetic modes passed ASan/UBSan and TSan.
+The platform authentication/attestation/quiescence/hook engine remains absent;
+there is no real installation or app activation. New source is not Android-built.
+
 ## Latest static caller evidence — 2026-10-23
 
 The exact captured getter/caller ownership path is now documented in

@@ -518,9 +518,9 @@ and fake decoders, not actual CoreUtils/OEM execution:
 
 ```sh
 g++ -std=c++17 -Wall -Wextra -Werror -pthread -fsanitize=address,undefined \
-  -fno-omit-frame-pointer -g scripts/carplay-native-analysis/native/{packet_conversion,avc_configuration,video_bridge,oem_ingress,decoder_lease,secondary_advertisement,secondary_session,secondary_runtime,oem_runtime_adapter,oem_runtime_adapter_test}.cpp \
+  -fno-omit-frame-pointer -g scripts/carplay-native-analysis/native/{packet_conversion,avc_configuration,video_bridge,oem_ingress,decoder_lease,secondary_advertisement,secondary_session,secondary_runtime,oem_runtime_adapter,hook_installation,oem_runtime_adapter_test}.cpp \
   -o /tmp/carplay-oem-runtime-test
-for mode in off enabled legacy race adopt close-getter; do
+for mode in off enabled legacy race adopt close-getter install install-fail install-contested; do
   timeout 25 /tmp/carplay-oem-runtime-test "$mode" || exit
 done
 ```
@@ -530,3 +530,7 @@ original error/null/ownership behavior, parallel repeated queries without duplic
 decoders, both registration orders/races, warm adoption without reinitialization,
 and close during getter preparation returning the original response. No new
 Android compilation, version, signing, OTA or vehicle operation performed.
+
+The inert hook coordinator and mandatory real-backend contract are described in
+[native/HOOK_INSTALLATION.md](native/HOOK_INSTALLATION.md). Installation modes use
+a fake quiescence/publication backend; they do not install hooks on the vehicle.

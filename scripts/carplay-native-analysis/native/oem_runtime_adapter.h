@@ -18,6 +18,8 @@ public:
     observed_abi::Status advertisementStatus() const noexcept;
 
 private:
+    friend class HookInstaller;
+    std::shared_ptr<void> installationLifetime_;
     const std::unique_ptr<SecondaryRuntime> runtime_;
     const OriginalGetDisplays original_;
     const ReleaseOwnedArray release_;

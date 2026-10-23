@@ -1,4 +1,5 @@
 #include "oem_runtime_adapter.h"
+#include "hook_installation.h"
 
 #include <cassert>
 #include <future>
@@ -329,6 +330,135 @@ void closingDuringGetterPreservesOriginalResponse() {
     release(result);
     assert(alive == 0);
 }
+
+struct InstallationState {
+    std::mutex callbacks;
+    std::shared_ptr<void> identity = std::make_shared<int>(7);
+    int preparations = 0;
+    int publications = 0;
+    int currencyChecks = 0;
+    int staleAt = 0;
+    bool invalid = false;
+    bool publishFails = false;
+    bool captureThrows = false;
+    bool quiescent = false;
+    bool active = false;
+    observed_abi::VideoCallbacks video = originals();
+};
+
+class FakeQuiescence final : public QuiescentHookTransaction {
+public:
+    FakeQuiescence(std::shared_ptr<InstallationState> state, std::unique_lock<std::mutex> lock)
+        : state_(std::move(state)), lock_(std::move(lock)) { state_->quiescent = true; }
+    ~FakeQuiescence() override { state_->quiescent = false; }
+    LivePrincipal capturePrincipal() override {
+        assert(state_->quiescent);
+        if (state_->captureThrows) { throw std::runtime_error("capture"); }
+        return {stream(mainKey), string(mainUuid), 110, state_->invalid ? 0U : 9U, state_->identity};
+    }
+    bool isCurrent(const LivePrincipal& principal) noexcept override {
+        assert(state_->quiescent && principal.epoch == 9);
+        return ++state_->currencyChecks != state_->staleAt;
+    }
+    bool publish(observed_abi::VideoCallbacks video, OriginalStartSession session,
+        OriginalGetDisplays displays) noexcept override {
+        assert(state_->quiescent && state_->currencyChecks == 2);
+        assert(session == impulse_carplay_runtime_session && displays == impulse_carplay_runtime_displays);
+        assert(originalInitializes == 0 && send(stream(mainKey)) == 37);
+        ++state_->publications;
+        if (state_->publishFails) { return false; }
+        state_->video = video;
+        state_->active = true;
+        return true;
+    }
+private:
+    const std::shared_ptr<InstallationState> state_;
+    std::unique_lock<std::mutex> lock_;
+};
+
+class FakePrepared final : public PreparedHooks {
+public:
+    explicit FakePrepared(std::shared_ptr<InstallationState> state) : state_(std::move(state)) {}
+    std::unique_ptr<OemRuntimeAdapter> makeAdapter() override { return ::makeAdapter(true); }
+    std::unique_ptr<QuiescentHookTransaction> tryQuiesce() override {
+        std::unique_lock<std::mutex> lock(state_->callbacks, std::try_to_lock);
+        if (!lock.owns_lock()) { return {}; }
+        state_->currencyChecks = 0;
+        return std::make_unique<FakeQuiescence>(state_, std::move(lock));
+    }
+private:
+    const std::shared_ptr<InstallationState> state_;
+};
+
+void coordinatedInstallation(bool failPublication, bool contested) {
+    auto state = std::make_shared<InstallationState>();
+    std::weak_ptr<void> pinnedIdentity = state->identity;
+    std::weak_ptr<PreparedHooks> pinnedPrepared;
+    Gate preparationGate;
+    bool pausePreparation = false;
+    HookInstaller installer([&](const HookAuthorization& authorization) -> std::shared_ptr<PreparedHooks> {
+        ++state->preparations;
+        if (pausePreparation) { preparationGate.block(); }
+        if (authorization.callerUid != 7 || authorization.requestId != 9 || authorization.token[0] != 42) {
+            return {};
+        }
+        auto prepared = std::make_shared<FakePrepared>(state);
+        pinnedPrepared = prepared;
+        return prepared;
+    });
+    HookAuthorization authorization;
+    assert(installer.install(authorization) == HookInstallResult::disabled && state->preparations == 0);
+    authorization.enabled = true;
+    assert(installer.install(authorization) == HookInstallResult::rejected);
+    authorization.callerUid = 7;
+    authorization.requestId = 9;
+    authorization.token[0] = 42;
+    {
+        std::unique_lock<std::mutex> activeCallback(state->callbacks);
+        auto installation = std::async(std::launch::async, [&] { return installer.install(authorization); });
+        assert(installation.get() == HookInstallResult::noQuiescence);
+    }
+    state->invalid = true;
+    assert(installer.install(authorization) == HookInstallResult::invalidPrincipal);
+    state->invalid = false;
+    state->staleAt = 1;
+    assert(installer.install(authorization) == HookInstallResult::stalePrincipal);
+    state->staleAt = 2;
+    assert(installer.install(authorization) == HookInstallResult::stalePrincipal);
+    state->staleAt = 0;
+    state->captureThrows = true;
+    assert(installer.install(authorization) == HookInstallResult::fault && !state->quiescent);
+    state->captureThrows = false;
+    assert(state->publications == 0 && originalInitializes == 0 && decoderCreates == 0);
+    if (contested) {
+        assert(pinIngressForProcess(makeIngress()));
+        assert(installer.install(authorization) == HookInstallResult::registrationUnavailable);
+        assert(state->publications == 0 && !state->active && !state->quiescent);
+        assert(pinnedPrepared.expired());
+        assert(state->video.processData(stream(mainKey), packet.data(), packet.size(), 1234,
+            nullptr, nullptr, nullptr) == 37);
+        return;
+    }
+    pausePreparation = true;
+    state->publishFails = failPublication;
+    auto installation = std::async(std::launch::async, [&] { return installer.install(authorization); });
+    preparationGate.wait();
+    assert(installer.install(authorization) == HookInstallResult::busy);
+    assert(state->video.processData(stream(mainKey), packet.data(), packet.size(), 1234,
+        nullptr, nullptr, nullptr) == 37);
+    preparationGate.release();
+    const auto expected = failPublication ? HookInstallResult::publicationFailedPinned : HookInstallResult::installed;
+    assert(installation.get() == expected);
+    assert(state->publications == 1 && state->active == !failPublication && !state->quiescent);
+    assert(installer.install(authorization) == (failPublication ? expected : HookInstallResult::alreadyInstalled));
+    assert(!pinnedPrepared.expired());
+    state->identity.reset();
+    assert(!pinnedIdentity.expired());
+    impulse_carplay_runtime_close();
+    assert(state->video.processData(stream(mainKey), packet.data(), packet.size(), 1234,
+        nullptr, nullptr, nullptr) == 37);
+    assert(originalInitializes == 0 && decoderCreates == 0 && alive == 0);
+}
 }
 
 int main(int count, char** arguments) {
@@ -337,6 +467,9 @@ int main(int count, char** arguments) {
     if (mode == "off" || mode == "enabled") { adapterMode(mode == "enabled"); }
     else if (mode == "adopt") { adoptExistingPrincipalWithoutReinitialization(); }
     else if (mode == "close-getter") { closingDuringGetterPreservesOriginalResponse(); }
+    else if (mode == "install" || mode == "install-fail" || mode == "install-contested") {
+        coordinatedInstallation(mode == "install-fail", mode == "install-contested");
+    }
     else { assert(mode == "legacy" || mode == "race"); legacyAndContestedRegistration(mode == "race"); }
     std::cout << "OEM runtime " << mode << ": C boundary, getter ownership/repeat and registration checks passed\n";
 }

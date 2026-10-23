@@ -17,6 +17,7 @@ add_library(carplay_video_bridge SHARED
     secondary_session.cpp
     secondary_runtime.cpp
     oem_runtime_adapter.cpp
+    hook_installation.cpp
 )
 target_compile_features(carplay_video_bridge PUBLIC cxx_std_17)
 target_compile_options(carplay_video_bridge PRIVATE -Wall -Wextra -Werror)
