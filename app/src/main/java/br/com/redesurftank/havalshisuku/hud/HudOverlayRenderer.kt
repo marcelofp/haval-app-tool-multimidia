@@ -30,6 +30,11 @@ class HudOverlayRenderer {
         const val FLAG_T = 3.5f
         const val FLAG_R = 21f
         const val FLAG_B = 14f
+        /** The destination flag on the map/arrow: size factor, largest size, and alpha (min + span x arrow opacity). */
+        const val AR_FLAG_SCALE = 0.7f
+        const val AR_FLAG_MAX = 24f
+        const val AR_FLAG_ALPHA_MIN = 0.2f
+        const val AR_FLAG_ALPHA_SPAN = 0.4f
         /** Map view roads: soft grey under the blue route. */
         const val MAP_ROAD_ALPHA = 215
         /** Edge-line roads: stroke width (half of it stays, outside the road) and its alpha. */
@@ -643,10 +648,11 @@ class HudOverlayRenderer {
         val raw = cx + (flag.x - HudArArrow.CX) * sx
         val y = HudArArrow.BOTTOM - (HudArArrow.BOTTOM - flag.y) * sy
         if (y <= M.CHEVRON_CY || y > HudArArrow.BOTTOM) return
-        val size = (flag.height * kotlin.math.sqrt(sx * sy)).coerceIn(10f, y - 40f)
+        // Smaller and see-through (owner): it marks the spot, it should not cover the road.
+        val size = (flag.height * kotlin.math.sqrt(sx * sy) * AR_FLAG_SCALE).coerceIn(10f, minOf(AR_FLAG_MAX, y - 40f))
         // The pennant flies away from the road: keep that side of it on the panel.
         val x = if (flag.pennant < 0) raw.coerceAtLeast(size * 0.7f) else raw.coerceAtMost(480f - size * 0.7f)
-        canvas.saveLayerAlpha(x - size, y - size - 2f, x + size, y + 2f, (255 * (0.35f + opacity)).toInt().coerceAtMost(255))
+        canvas.saveLayerAlpha(x - size, y - size - 2f, x + size, y + 2f, (255 * (AR_FLAG_ALPHA_MIN + AR_FLAG_ALPHA_SPAN * opacity)).toInt().coerceIn(0, 255))
         canvas.save()
         if (flag.pennant < 0) {
             canvas.translate(x, 0f)
