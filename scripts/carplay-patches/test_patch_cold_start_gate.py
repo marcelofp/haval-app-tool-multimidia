@@ -12,9 +12,16 @@ SPEC.loader.exec_module(MODULE)
 
 
 class ColdStartGatePatchTest(unittest.TestCase):
-    def create_fixture(self, root: Path, service: str = MODULE.SERVICE_ANCHOR) -> Path:
+    def create_fixture(self, root: Path, service=None) -> Path:
         service_path = root / MODULE.SERVICE_RELATIVE_PATH
         service_path.parent.mkdir(parents=True)
+        if service is None:
+            service = (
+                ".method public onCreate()V\n"
+                "    .locals 1\n\n"
+                + MODULE.SERVICE_ANCHOR
+                + "\n    return-void\n.end method\n"
+            )
         service_path.write_text(service, encoding="utf-8")
         return service_path
 
@@ -44,8 +51,40 @@ class ColdStartGatePatchTest(unittest.TestCase):
             MODULE.patch_decoded_apk(root)
             (root / MODULE.GATE_RELATIVE_PATH).write_text("changed", encoding="utf-8")
 
-            with self.assertRaisesRegex(RuntimeError, "helper is missing or changed"):
+            with self.assertRaisesRegex(RuntimeError, "helper changed"):
                 MODULE.patch_decoded_apk(root)
+
+    def test_accepts_reassembled_source_without_comments(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            service_path = self.create_fixture(root)
+            MODULE.patch_decoded_apk(root)
+            service_path.write_text(
+                "\n".join(
+                    line for line in service_path.read_text(encoding="utf-8").splitlines()
+                    if not line.lstrip().startswith("#")
+                ),
+                encoding="utf-8",
+            )
+            gate_path = root / MODULE.GATE_RELATIVE_PATH
+            reassembled_gate = "\n".join(
+                line for line in gate_path.read_text(encoding="utf-8").splitlines()
+                if not line.lstrip().startswith("#")
+            )
+            for original, rebuilt in {
+                ":enabled": ":cond_0",
+                ":poll": ":goto_0",
+                ":check_cancel": ":cond_1",
+                ":check_timeout": ":cond_2",
+                ":sleep": ":cond_3",
+            }.items():
+                reassembled_gate = reassembled_gate.replace(original, rebuilt)
+            gate_path.write_text(
+                reassembled_gate,
+                encoding="utf-8",
+            )
+
+            self.assertFalse(MODULE.patch_decoded_apk(root))
 
 
 if __name__ == "__main__":

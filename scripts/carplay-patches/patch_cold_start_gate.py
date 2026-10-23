@@ -11,12 +11,14 @@ the OEM CarPlay native stack, without changing the normal startup path.
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 
 SERVICE_RELATIVE_PATH = Path("smali/com/ts/carplay/CarPlayService.smali")
 GATE_RELATIVE_PATH = Path("smali/com/ts/carplay/experimental/ImpulseColdStartGate.smali")
 SENTINEL = "# IMPULSE_CARPLAY_COLD_START_GATE_V1"
+GATE_CALL = "invoke-static {}, Lcom/ts/carplay/experimental/ImpulseColdStartGate;->awaitController()V"
 
 SERVICE_ANCHOR = """    invoke-super {p0}, Landroid/app/Service;->onCreate()V
 
@@ -187,14 +189,54 @@ GATE_SMALI = r""".class public final Lcom/ts/carplay/experimental/ImpulseColdSta
 """
 
 
+def normalize_smali(source: str) -> list[str]:
+    lines = [
+        line.strip()
+        for line in source.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    labels = {}
+    for line in lines:
+        match = re.fullmatch(r":([A-Za-z0-9_]+)", line)
+        if match:
+            labels[match.group(1)] = f"label_{len(labels)}"
+
+    def replace_label(match):
+        name = match.group(1)
+        return ":" + labels.get(name, name)
+
+    return [re.sub(r":([A-Za-z0-9_]+)", replace_label, line) for line in lines]
+
+
+def verify_decoded_apk(decoded_directory: Path) -> None:
+    service_path = decoded_directory / SERVICE_RELATIVE_PATH
+    gate_path = decoded_directory / GATE_RELATIVE_PATH
+    service = service_path.read_text(encoding="utf-8")
+    if service.count(GATE_CALL) != 1:
+        raise RuntimeError("expected exact cold-start gate call once")
+    on_create_start = service.index(".method public onCreate()V")
+    on_create_end = service.index(".end method", on_create_start)
+    on_create = service[on_create_start:on_create_end]
+    super_offset = on_create.index("invoke-super {p0}, Landroid/app/Service;->onCreate()V")
+    gate_offset = on_create.index(GATE_CALL)
+    context_offset = on_create.index(
+        "iput-object p0, p0, Lcom/ts/carplay/CarPlayService;->mContext:Landroid/content/Context;"
+    )
+    if not super_offset < gate_offset < context_offset:
+        raise RuntimeError("cold-start gate call is outside the reviewed startup boundary")
+    if not gate_path.is_file():
+        raise RuntimeError("cold-start gate helper is missing")
+    if normalize_smali(gate_path.read_text(encoding="utf-8")) != normalize_smali(GATE_SMALI):
+        raise RuntimeError("cold-start gate helper changed")
+
+
 def patch_decoded_apk(decoded_directory: Path) -> bool:
     service_path = decoded_directory / SERVICE_RELATIVE_PATH
     gate_path = decoded_directory / GATE_RELATIVE_PATH
     service = service_path.read_text(encoding="utf-8")
 
-    if SENTINEL in service:
-        if not gate_path.is_file() or gate_path.read_text(encoding="utf-8") != GATE_SMALI:
-            raise RuntimeError("cold-start gate sentinel exists but helper is missing or changed")
+    if SENTINEL in service or GATE_CALL in service:
+        verify_decoded_apk(decoded_directory)
         return False
 
     if service.count(SERVICE_ANCHOR) != 1:
@@ -203,6 +245,7 @@ def patch_decoded_apk(decoded_directory: Path) -> bool:
     service_path.write_text(service.replace(SERVICE_ANCHOR, SERVICE_PATCH), encoding="utf-8")
     gate_path.parent.mkdir(parents=True, exist_ok=True)
     gate_path.write_text(GATE_SMALI, encoding="utf-8")
+    verify_decoded_apk(decoded_directory)
     return True
 
 
