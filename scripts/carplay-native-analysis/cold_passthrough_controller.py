@@ -305,31 +305,25 @@ class ColdPassthroughController:
         }
 
     def _wait_new_pid(self, old_pid: str, deadline: float) -> int:
-        old = set(re.findall(r"\d+", old_pid))
-        auto_restart_deadline = min(deadline, time.monotonic() + 1.5)
-        while time.monotonic() < auto_restart_deadline:
-            result = self.remote.run(f"printf 'impulse_pid='; pidof {OEM_PROCESS} || true", check=False)
-            matches = re.findall(r"(?m)^impulse_pid=([0-9 ]*)$", result)
-            candidates = [int(value) for value in re.findall(r"\d+", matches[-1] if matches else "")]
-            for candidate in candidates:
-                if str(candidate) not in old:
-                    return candidate
-            time.sleep(0.1)
-        # Rule 40 allows starting the service only when the process is absent.
-        probe = self.remote.run(f"printf 'impulse_pid='; pidof {OEM_PROCESS} || true", check=False)
-        matches = re.findall(r"(?m)^impulse_pid=([0-9 ]*)$", probe)
-        if not (matches and matches[-1].strip()):
-            self.remote.run(
-                "component=$(printf 'com.ts.carplay/.\\103ar\\120lay\\123ervice'); "
-                "am startservice -n \"$component\" >/dev/null"
-            )
-        while time.monotonic() < deadline:
-            result = self.remote.run(f"printf 'impulse_pid='; pidof {OEM_PROCESS} || true", check=False)
-            matches = re.findall(r"(?m)^impulse_pid=([0-9 ]*)$", result)
-            for value in re.findall(r"\d+", matches[-1] if matches else ""):
-                if value not in old:
-                    return int(value)
-            time.sleep(0.1)
+        old = " ".join(re.findall(r"\d+", old_pid))
+        timeout = max(1.0, deadline - time.monotonic())
+        result = self.remote.run(
+            f"old={shell_quote(old)}; sleep 0.3; fresh=\"$(pidof {OEM_PROCESS})\"; "
+            "if [ -z \"$fresh\" ] || [ \"$fresh\" = \"$old\" ]; then "
+            "component=$(printf 'com.ts.carplay/.\\103ar\\120lay\\123ervice'); "
+            "am startservice -n \"$component\" >/dev/null; fi; "
+            "attempt=0; while [ $attempt -lt 40 ]; do "
+            f"fresh=\"$(pidof {OEM_PROCESS})\"; "
+            "if [ -n \"$fresh\" ] && [ \"$fresh\" != \"$old\" ]; then break; fi; "
+            "attempt=$((attempt+1)); sleep 0.1; done; "
+            "printf 'fresh_pid=%s\\n' \"$fresh\"",
+            timeout=timeout,
+            check=False,
+        )
+        matches = re.findall(r"(?m)^fresh_pid=([0-9 ]*)$", result)
+        for value in re.findall(r"\d+", matches[-1] if matches else ""):
+            if value not in set(re.findall(r"\d+", old)):
+                return int(value)
         raise ControllerError("Fresh OEM CarPlay host did not appear inside the cold-gate window")
 
     def _wait_phase(self, expected: set[str], deadline: float) -> tuple[str, str]:
