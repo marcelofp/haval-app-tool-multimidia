@@ -160,13 +160,13 @@ object HudArArrow {
     const val MAP_HALF_M = 5f
     const val MAP_HEAD_L_M = 14f
     const val MAP_HEAD_HALF_M = 10f
-    const val MAP_FLAG_GAP_M = 3f
+    const val MAP_FLAG_GAP_M = 1f
     const val MAP_FLAG_H_M = 6f
     /**
      * The pole stays at least this far (px) outside the drawn road or arrow head. A metre offset
      * alone collapses into the centre of a road that has been widened to [MAP_MIN_PX].
      */
-    const val MAP_FLAG_GAP_PX = 12f
+    const val MAP_FLAG_GAP_PX = 4f
     /**
      * Minimum drawn thickness (px) of a street: one running sideways in the distance spans only a
      * few metres of depth and would shrink to a hairline (the turn street included).

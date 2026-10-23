@@ -31,10 +31,10 @@ class HudOverlayRenderer {
         const val FLAG_R = 21f
         const val FLAG_B = 14f
         /** The destination flag on the map/arrow: size factor, largest size, and alpha (min + span x arrow opacity). */
-        const val AR_FLAG_SCALE = 0.7f
-        const val AR_FLAG_MAX = 24f
-        const val AR_FLAG_ALPHA_MIN = 0.2f
-        const val AR_FLAG_ALPHA_SPAN = 0.4f
+        const val AR_FLAG_SCALE = 0.85f
+        const val AR_FLAG_MAX = 30f
+        const val AR_FLAG_ALPHA_MIN = 0.3f
+        const val AR_FLAG_ALPHA_SPAN = 0.5f
         /** Map view roads: soft grey under the blue route. */
         const val MAP_ROAD_ALPHA = 215
         /** Edge-line roads: stroke width (half of it stays, outside the road) and its alpha. */
@@ -310,7 +310,7 @@ class HudOverlayRenderer {
     private val flagOutline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(217, 255, 255, 255)
         style = Paint.Style.STROKE
-        strokeWidth = 1.2f
+        strokeWidth = 0.7f
     }
     // Pennant in the 24 box (owner): a flat-edged rectangle, chequered like a finish flag
     // (4 x 3 squares, every other one lit; the outline keeps the dark ones reading as flag).

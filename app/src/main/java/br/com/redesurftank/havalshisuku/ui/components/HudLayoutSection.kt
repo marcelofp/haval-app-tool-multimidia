@@ -237,7 +237,7 @@ private fun HudLayoutCard(
 
 /** Tabs of the Navegação settings dialog. */
 /** The settings dialog's fixed height (fits the 720 px screen between the status bar and the dock). */
-private val DIALOG_HEIGHT = 468.dp
+private val DIALOG_HEIGHT = 400.dp
 
 /** At most four rows per tab, so the dialog stays compact (owner). Mapa is for Navegação AR only. */
 private enum class HudSettingsTab(val title: String) { NAVIGATION("Geral"), ARROW("Mapa"), CHEVRONS("Setas"), BARS("Indicadores") }
@@ -285,15 +285,7 @@ private fun HudNavigationSettingsDialog(
             shape = RoundedCornerShape(16.dp),
             border = BorderStroke(1.5.dp, ImpTokens.Accent)
         ) {
-            Column(modifier = Modifier.fillMaxHeight().padding(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        if (layout == HudOverlayModel.Layout.AR) "Layout Navegação AR" else "Layout Navegação",
-                        color = Color.White,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+            Column(modifier = Modifier.fillMaxHeight().padding(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 16.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(24.dp), modifier = Modifier.weight(1f)) {
                     // Left: one tab of options at a time, the buttons under it (near the driver).
                     Column(modifier = Modifier.weight(1.3f).fillMaxHeight()) {
@@ -417,6 +409,14 @@ private fun HudNavigationSettingsDialog(
                     }
                     // Right: what the HUD will show with these options.
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        // The title sits over the preview, so the options start right under the tabs.
+                        Text(
+                            if (layout == HudOverlayModel.Layout.AR) "Layout Navegação AR" else "Layout Navegação",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                        )
                         HudPreview(
                             config = shown.copy(layout = layout),
                             description = "Prévia com estas opções",
