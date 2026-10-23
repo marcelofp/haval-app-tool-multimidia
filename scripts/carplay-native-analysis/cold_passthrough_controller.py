@@ -406,6 +406,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bridge", type=Path, default=defaults.bridge)
     parser.add_argument("--interceptor", type=Path, default=defaults.interceptor)
     parser.add_argument("--profile", type=Path, default=defaults.profile)
+    parser.add_argument("--endpoint", type=Path, default=defaults.endpoint)
     parser.add_argument("--stage-only", action="store_true", help="upload and verify, but do not restart the OEM host")
     parser.add_argument(
         "--execute-cold-restart",
@@ -420,8 +421,13 @@ def main() -> int:
     if not args.stage_only and not args.execute_cold_restart:
         print("Refusing live run without --execute-cold-restart", file=sys.stderr)
         return 64
-    inputs = Inputs(args.bridge.resolve(), args.interceptor.resolve(), args.profile.resolve())
-    for path in (inputs.bridge, inputs.interceptor, inputs.profile):
+    inputs = Inputs(
+        bridge=args.bridge.resolve(),
+        interceptor=args.interceptor.resolve(),
+        profile=args.profile.resolve(),
+        endpoint=args.endpoint.resolve(),
+    )
+    for path in (inputs.bridge, inputs.interceptor, inputs.profile, inputs.endpoint):
         if not path.is_file():
             print(f"Missing input: {path}", file=sys.stderr)
             return 66
