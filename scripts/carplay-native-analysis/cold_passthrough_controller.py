@@ -46,7 +46,10 @@ MOUNTED_SERVICE = "/vendor/app/TsCarPlayService/TsCarPlayService.apk"
 EXPECTED_GATE_MD5 = "b61f0e4d63535a2ef447be559211697b"
 PRINCIPAL_UUID = "e5f7a68d-7b0f-4305-984b-974f677a150b"
 PID_PLACEHOLDER = 1_234_567_890
-MARKER_PREFIX = "__IMPULSE_RC_"
+# This OEM console canonicalizes typed ASCII to lowercase, including marker
+# literals embedded in commands. Keep the wire marker lowercase so completion
+# detection observes the bytes that are actually printed.
+MARKER_PREFIX = "__impulse_rc_"
 
 
 class ControllerError(RuntimeError):
@@ -147,8 +150,37 @@ class TelnetShell:
                     received.extend(chunk)
                 except socket.timeout:
                     pass
-            sock.sendall(payload)
-            while marker not in received:
+            # The OEM console echoes bytes as they arrive.  If the marker is
+            # sent in the same write as `stty -echo`, its echoed command line
+            # can satisfy the completion search before the command executes.
+            # Disable echo in a separate round trip, drain that response, and
+            # only then send the marker-bearing payload.
+            echo_prefix = b"stty -echo; "
+            if payload.startswith(echo_prefix):
+                sock.sendall(b"stty -echo\n")
+                quiet_until = time.monotonic() + 0.25
+                while time.monotonic() < quiet_until:
+                    try:
+                        chunk = sock.recv(4096)
+                        if not chunk:
+                            break
+                        received.extend(chunk)
+                    except socket.timeout:
+                        pass
+                payload = payload[len(echo_prefix):]
+            pending = memoryview(payload)
+            while pending:
+                if time.monotonic() >= deadline:
+                    raise ControllerError("Telnet payload upload timed out")
+                try:
+                    sent = sock.send(pending[:16384])
+                    if sent <= 0:
+                        raise ControllerError("Telnet console closed during payload upload")
+                    pending = pending[sent:]
+                except socket.timeout:
+                    continue
+            marker_result = re.compile(re.escape(marker.decode()) + r"\d+")
+            while not marker_result.search(self._clean(bytes(received))):
                 if time.monotonic() >= deadline:
                     raise ControllerError("Telnet command timed out")
                 try:
@@ -232,11 +264,14 @@ class ColdPassthroughController:
 
     def preflight(self) -> dict[str, str]:
         output = self.remote.run(
-            "printf 'mounted='; md5sum " + shell_quote(MOUNTED_SERVICE) + " | awk '{print $1}'; "
-            "printf 'staged='; md5sum " + shell_quote(REMOTE_SERVICE_PATCH) + " | awk '{print $1}'; "
+            "printf 'mounted='; find /vendor/app -iname tscarplayservice.apk -exec md5sum {} \\; "
+            "| head -n 1 | cut -d' ' -f1; "
+            "printf 'staged='; find /data/local/tmp/carplay_patches -iname tscarplayservice.apk "
+            "-exec md5sum {} \\; | head -n 1 | cut -d' ' -f1; "
             "printf 'injector='; test -x " + shell_quote(REMOTE_INJECTOR) + " && echo yes || echo no; "
             "printf 'carplay_tasks='; am stack list 2>/dev/null | grep -c 'com.ts.carplay.app' || true; "
-            "printf 'aa_tasks='; am stack list 2>/dev/null | grep -Ec 'com.google.android.projection.gearhead|com.ts.androidauto' || true; "
+            "printf 'aa_tasks='; am stack list 2>/dev/null "
+            "| grep -e 'com.google.android.projection.gearhead' -e 'com.ts.androidauto' -c || true; "
             "printf 'pid='; pidof " + OEM_PROCESS + " || true"
         )
         values = dict(re.findall(r"(?m)^(mounted|staged|injector|carplay_tasks|aa_tasks|pid)=([^\n]*)", output))
@@ -272,21 +307,24 @@ class ColdPassthroughController:
     def _wait_new_pid(self, old_pid: str, deadline: float) -> int:
         old = set(re.findall(r"\d+", old_pid))
         while time.monotonic() < deadline:
-            result = self.remote.run(f"printf 'IMPULSE_PID='; pidof {OEM_PROCESS} || true", check=False)
-            match = re.search(r"IMPULSE_PID=([0-9 ]*)", result)
+            result = self.remote.run(f"printf 'impulse_pid='; pidof {OEM_PROCESS} || true", check=False)
+            match = re.search(r"impulse_pid=([0-9 ]*)", result)
             candidates = [int(value) for value in re.findall(r"\d+", match.group(1) if match else "")]
             for candidate in candidates:
                 if str(candidate) not in old:
                     return candidate
             time.sleep(0.1)
         # Rule 40 allows starting the service only when the process is absent.
-        probe = self.remote.run(f"printf 'IMPULSE_PID='; pidof {OEM_PROCESS} || true", check=False)
-        match = re.search(r"IMPULSE_PID=([0-9 ]*)", probe)
+        probe = self.remote.run(f"printf 'impulse_pid='; pidof {OEM_PROCESS} || true", check=False)
+        match = re.search(r"impulse_pid=([0-9 ]*)", probe)
         if not (match and match.group(1).strip()):
-            self.remote.run(f"am startservice -n {OEM_SERVICE} >/dev/null")
+            self.remote.run(
+                "component=$(printf 'com.ts.carplay/.\\103ar\\120lay\\123ervice'); "
+                "am startservice -n \"$component\" >/dev/null"
+            )
         while time.monotonic() < deadline:
-            result = self.remote.run(f"printf 'IMPULSE_PID='; pidof {OEM_PROCESS} || true", check=False)
-            match = re.search(r"IMPULSE_PID=([0-9 ]*)", result)
+            result = self.remote.run(f"printf 'impulse_pid='; pidof {OEM_PROCESS} || true", check=False)
+            match = re.search(r"impulse_pid=([0-9 ]*)", result)
             for value in re.findall(r"\d+", match.group(1) if match else ""):
                 if value not in old:
                     return int(value)
@@ -316,22 +354,21 @@ class ColdPassthroughController:
             )
             old_pid = before.get("pid", "")
             for value in re.findall(r"\d+", old_pid):
-                self.remote.run(f"kill -TERM {value} 2>/dev/null || true", check=False)
+                self.remote.run(f"kill -15 {value} 2>/dev/null || true", check=False)
             deadline = time.monotonic() + 8.0
             self.pid = self._wait_new_pid(old_pid, deadline)
             maps = self.remote.run(
-                f"grep -E 'libAirPlay_ts|libcarplaystack|libCoreUtils_ts' /proc/{self.pid}/maps || true",
+                f"grep -ei 'libairplay_ts|libcarplaystack|libcoreutils_ts' /proc/{self.pid}/maps || true",
                 check=False,
             )
-            if re.search(r"libAirPlay_ts|libcarplaystack|libCoreUtils_ts", maps):
+            if re.search(r"libairplay_ts|libcarplaystack|libcoreutils_ts", maps.lower()):
                 raise ControllerError("OEM libraries loaded before injector arming; refusing warm interception")
 
             bridge, interceptor, profile, _ = self.inputs.read()
             exact = launcher_for_pid(interceptor, profile, self.pid, len(bridge), sha256_bytes(bridge)).encode()
-            template_needle = f'"expectedPid":{PID_PLACEHOLDER}'
             self.remote.run(
                 "sed -i "
-                + shell_quote(f's/{template_needle}/"expectedPid":{self.pid}/')
+                + shell_quote(f's/{PID_PLACEHOLDER}/{self.pid}/')
                 + " " + shell_quote(REMOTE_LAUNCHER)
             )
             observed = self.remote.run(
@@ -341,7 +378,7 @@ class ColdPassthroughController:
                 raise ControllerError("PID-specialized launcher hash mismatch")
 
             command = (
-                f"setsid {REMOTE_INJECTOR} -D local -p {self.pid} -s {REMOTE_LAUNCHER} "
+                f"setsid {REMOTE_INJECTOR} --device=local -p {self.pid} -s {REMOTE_LAUNCHER} "
                 f"> {REMOTE_LOG} 2>&1 < /dev/null &"
             )
             self.remote.run(command)
@@ -355,7 +392,7 @@ class ColdPassthroughController:
             if phase != "installed-pinned":
                 raise ControllerError(f"Cold interceptor did not install passthrough (phase={phase}): {log[-1200:]}")
             self.remote.run(
-                f"setsid {REMOTE_INJECTOR} -D local -p {self.pid} -s {REMOTE_ENDPOINT_LAUNCHER} "
+                f"setsid {REMOTE_INJECTOR} --device=local -p {self.pid} -s {REMOTE_ENDPOINT_LAUNCHER} "
                 f"> {REMOTE_ENDPOINT_LOG} 2>&1 < /dev/null &"
             )
             endpoint_deadline = time.monotonic() + 8.0
