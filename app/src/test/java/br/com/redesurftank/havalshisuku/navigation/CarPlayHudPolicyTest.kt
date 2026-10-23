@@ -34,6 +34,8 @@ class CarPlayHudPolicyTest {
         assertTrue(policy.enabled)
         policy.connect("capture", 1)
         policy.onCarPlay("capture", 1, raw(), 100)
+        assertFalse(policy.snapshot(100).active)
+        policy.onAndroidAutoAvailability(false, 100)
         assertTrue(policy.snapshot(100).active)
         policy.end("capture")
         assertFalse(policy.enabled)
