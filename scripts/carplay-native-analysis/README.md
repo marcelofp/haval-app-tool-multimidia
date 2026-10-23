@@ -579,3 +579,9 @@ The Node command runs a fake Frida process using captured file bytes; it does no
 contact the car or perform real ARM64 interception. Actual arming requires the
 trusted expected PID, explicit enable, verified build receipt/hash/staged bridge,
 principal identity and a process observed before all three OEM modules load.
+
+The deterministic startup window and its staged build are documented in
+[`docs/architecture/carplay-cold-start-controller.md`](../../docs/architecture/carplay-cold-start-controller.md).
+`make_cold_launcher.py` creates a private auto-arming launcher only from the
+reviewed v3 profile and fixed bridge identity; it does not reload the OEM process
+or activate a secondary display.
