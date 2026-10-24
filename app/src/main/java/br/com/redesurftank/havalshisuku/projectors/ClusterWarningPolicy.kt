@@ -144,6 +144,20 @@ internal object ClusterWarningPolicy {
     private val cardsTheCarDoesNotRequeue: Set<String> =
             setOf(cardIdFor(CarConstants.CAR_BASIC_TIREPRESS_WARNING.value))
 
+    /**
+     * Whether a car.basic.driving_ready_state change is the car switching on.
+     *
+     * The car re-shows its standing warnings at every power-on, so every acknowledgement must go
+     * with it. That includes a soft power cycle, where the head unit only sleeps: on 2026-10-23 the
+     * car was switched off at 08:03 and on at 08:06 with the head unit up throughout (uptime 1 h 36
+     * min), the cluster re-showed its warnings, and our label stayed down because the tyre
+     * acknowledgement was still held in memory. A head-unit reboot was already covered by the
+     * boot-count check in [isSameBoot].
+     *
+     * Only a transition counts: with no previous reading ([wasOff] null) nothing is cleared.
+     */
+    fun isPowerOn(wasOff: Boolean?, isOff: Boolean): Boolean = wasOff == true && !isOff
+
     /** One acknowledged card as saved: what every key behind it read when it was dismissed. */
     data class SavedDismissal(val cardId: String, val values: Map<String, String>)
 
