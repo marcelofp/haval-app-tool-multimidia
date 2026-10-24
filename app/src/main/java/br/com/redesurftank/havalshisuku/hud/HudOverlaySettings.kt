@@ -32,6 +32,7 @@ object HudOverlaySettings {
                 ?: defaults.arPlacement,
             mapStreets = prefs.getBoolean(SharedPreferencesKeys.HUD_AR_MAP.key, defaults.mapStreets),
             mapEdges = prefs.getBoolean(SharedPreferencesKeys.HUD_AR_MAP_EDGES.key, defaults.mapEdges),
+            font = HudOverlayModel.Font.fromKey(prefs.getString(SharedPreferencesKeys.HUD_FONT.key, null)) ?: defaults.font,
             showTurnFromM = prefs.getInt(SharedPreferencesKeys.HUD_NAV_SHOW_TURN_FROM_M.key, defaults.showTurnFromM)
                 .takeIf { it in HudOverlayModel.SHOW_TURN_FROM_OPTIONS } ?: defaults.showTurnFromM
         )
@@ -65,6 +66,7 @@ object HudOverlaySettings {
             .putString(SharedPreferencesKeys.HUD_AR_PLACEMENT.key, config.arPlacement.key)
             .putBoolean(SharedPreferencesKeys.HUD_AR_MAP.key, config.mapStreets)
             .putBoolean(SharedPreferencesKeys.HUD_AR_MAP_EDGES.key, config.mapEdges)
+            .putString(SharedPreferencesKeys.HUD_FONT.key, config.font.key)
             .putInt(SharedPreferencesKeys.HUD_NAV_SHOW_TURN_FROM_M.key, config.showTurnFromM)
             .remove(LEGACY_ENABLED_KEY)
             .apply()

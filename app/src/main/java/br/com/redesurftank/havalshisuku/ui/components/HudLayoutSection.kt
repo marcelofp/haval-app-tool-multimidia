@@ -240,7 +240,7 @@ private fun HudLayoutCard(
 private val DIALOG_HEIGHT = 400.dp
 
 /** At most four rows per tab, so the dialog stays compact (owner). Mapa is for Navegação AR only. */
-private enum class HudSettingsTab(val title: String) { NAVIGATION("Geral"), ARROW("Mapa"), CHEVRONS("Setas"), BARS("Indicadores") }
+private enum class HudSettingsTab(val title: String) { NAVIGATION("Geral"), ARROW("Mapa"), CHEVRONS("Setas"), BARS("Visual") }
 
 /**
  * Wide two-pane dialog for the 1920x720 head unit: the options on the left split into tabs so
@@ -397,6 +397,13 @@ private fun HudNavigationSettingsDialog(
                                     enabled = gauges != HudOverlayModel.Gauges.NONE,
                                     info = "Só aparece com o motor a combustão ligado; vermelho a partir de 5 mil rpm."
                                 ) { change(config.copy(rpmBar = it), PreviewFocus.GAUGES) }
+                                ChoiceRow(
+                                    "Fonte",
+                                    "Espessura do texto no HUD.",
+                                    listOf("Fina", "Leve", "Normal"),
+                                    HudOverlayModel.Font.entries.indexOf(config.font),
+                                    info = "Fina é a mais discreta no para-brisa; Normal é a mais fácil de ler sob sol forte."
+                                ) { change(config.copy(font = HudOverlayModel.Font.entries[it])) }
                             }
                         }
                         }

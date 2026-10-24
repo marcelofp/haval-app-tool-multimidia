@@ -264,6 +264,7 @@ object HudOverlayController {
             streets = HudMapFeed.lines,
             wideArcs = wideArcs,
             mapPending = HudMapFeed.pending,
+            mapProgress = HudMapFeed.progress,
             onRoundabout = rbTracker.entered || roundaboutProgress() > 0f,
             // A demo is a moving drive even with the car parked. Otherwise the real speed:
             // 0 hides the blue approach chevrons.

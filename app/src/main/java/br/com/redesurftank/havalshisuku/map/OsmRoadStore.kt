@@ -42,8 +42,8 @@ object OsmRoadStore {
     /** Per server, what the last request got (code or error), for the durable trace. */
     @Volatile private var lastOutcome = ""
 
-    /** The roads round a point and whether every tile there is loaded (else the view isn't whole). */
-    class Near(val roads: List<OsmRoad>, val complete: Boolean)
+    /** The roads round a point, whether every tile there is loaded (else the view isn't whole), and how many are. */
+    class Near(val roads: List<OsmRoad>, val complete: Boolean, val loaded: Int = 0, val total: Int = 0)
 
     private val io = Executors.newSingleThreadExecutor { r -> Thread(r, "OsmRoadStore") }
     /** The region download runs apart, so it never holds up the tiles the view needs now. */
@@ -91,7 +91,9 @@ object OsmRoadStore {
             background.execute { runCatching { saveUse() } }
         }
         if (missing.isNotEmpty()) io.execute { load(missing, onLoaded) }
-        return Near(out, OsmRoads.tilesAround(lat, lon, radiusM).all { tiles.containsKey(it.key) })
+        val around = OsmRoads.tilesAround(lat, lon, radiusM)
+        val loaded = around.count { tiles.containsKey(it.key) }
+        return Near(out, loaded == around.size, loaded, around.size)
     }
 
     private fun load(wanted: List<OsmRoads.Tile>, onLoaded: () -> Unit) {
@@ -138,10 +140,11 @@ object OsmRoadStore {
      * Downloads, in the background, every tile within [radiusM] of the point that isn't on disk
      * (or is older than [TTL_MS]), in 3x3-tile boxes, so the map is there while driving without
      * the servers (they failed for a whole drive on 2026-10-19). Only what is missing goes out;
-     * when everything is there it costs a directory check. One region at a time.
+     * when everything is there it costs a directory check. One region at a time: false when
+     * one is still running (this one is not queued).
      */
-    fun prefetch(lat: Double, lon: Double, radiusM: Double) {
-        if (prefetching) return
+    fun prefetch(lat: Double, lon: Double, radiusM: Double): Boolean {
+        if (prefetching) return false
         prefetching = true
         background.execute {
             try {
@@ -152,6 +155,7 @@ object OsmRoadStore {
                 prefetching = false
             }
         }
+        return true
     }
 
     private fun prefetchRegion(lat: Double, lon: Double, radiusM: Double) {

@@ -22,13 +22,13 @@ class HudOverlayView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         renderer.draw(canvas, frame)
         // Chevrons animate: keep redrawing (~30 fps) only while they are up; the
-        // "carregando mapa" note blinks on its own clock (5 s on, 10 s off).
+        // "carregando mapa" bar sweeps slowly while nothing has arrived yet.
         if (frame?.chevrons?.animate == true) postInvalidateDelayed(CHEVRON_FRAME_MS)
         else if (frame?.tbt?.mapPending == true) postInvalidateDelayed(PENDING_FRAME_MS)
     }
 
     private companion object {
         const val CHEVRON_FRAME_MS = 33L
-        const val PENDING_FRAME_MS = 1_000L
+        const val PENDING_FRAME_MS = 250L
     }
 }

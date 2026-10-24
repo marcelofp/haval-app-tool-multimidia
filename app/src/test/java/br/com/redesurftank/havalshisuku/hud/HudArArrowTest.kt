@@ -417,6 +417,27 @@ class HudArArrowTest {
     }
 
     @Test
+    fun `Sempre arrow follows the road's bend ahead, then the turn`() {
+        // Straight, then bending right: the arrow leans right on top of the arc.
+        val straight = floatArrayOf(0f, 0f, 0f, 200f)
+        assertEquals(0f, HudOverlayModel.roadBendAhead(straight)!!, 0.5f)
+        val bend = floatArrayOf(0f, 0f, 0f, 30f, 30f, 60f, 60f, 90f, 90f, 120f)
+        val deg = HudOverlayModel.roadBendAhead(bend)!!
+        assertEquals(45f, deg, 1f)
+        assertEquals(-45f, HudOverlayModel.roadBendAhead(floatArrayOf(0f, 0f, 0f, 30f, -30f, 60f, -60f, 90f, -90f, 120f))!!, 1f)
+        assertNull(HudOverlayModel.roadBendAhead(floatArrayOf(0f, 0f, 0f, 40f)))
+        // Never more than the cap.
+        assertEquals(HudOverlayModel.CHEVRON_ROAD_MAX_DEG, HudOverlayModel.roadBendAhead(floatArrayOf(0f, 0f, 0f, 30f, 100f, 31f, 200f, 32f))!!, 0.01f)
+        val far = HudOverlayModel.chevronCompass(1, true, 0f, roadDeg = 30f)
+        assertEquals(-60f, far.dir, 0.01f)
+        assertTrue(far.x > HudOverlayModel.ARC_CX)
+        // Close to the turn the bend no longer matters: the turn's diagonal.
+        val near = HudOverlayModel.chevronCompass(1, true, 1f, roadDeg = -40f)
+        assertEquals(HudOverlayModel.chevronCompass(1, true, 1f).x, near.x, 0.01f)
+        assertEquals(-45f, near.dir, 0.01f)
+    }
+
+    @Test
     fun `chevrons on a roundabout - never entering it, only near the exit`() {
         val ar = HudOverlayModel.Config(layout = HudOverlayModel.Layout.AR, chevronsAlways = true)
         val rb = Directions(active = true, distance = "120 m", distanceM = 120, turn = "ROUNDABOUT", exitNumber = 3, turnAngle = 270, roundaboutClockwise = false)
@@ -647,14 +668,14 @@ class HudArArrowTest {
     }
 
     @Test
-    fun `carregando mapa - 5 s shown, 10 s hidden, round and round`() {
-        assertTrue(HudOverlayModel.mapPendingVisible(0L))
-        assertTrue(HudOverlayModel.mapPendingVisible(4_999L))
-        assertTrue(!HudOverlayModel.mapPendingVisible(5_000L))
-        assertTrue(!HudOverlayModel.mapPendingVisible(14_999L))
-        assertTrue(HudOverlayModel.mapPendingVisible(15_000L))
-        // On the right, inside the panel.
+    fun `carregando mapa - steady on the right, with its loading share`() {
+        // On the right, inside the panel, the bar under the note and above the band's bottom.
         assertTrue(HudOverlayModel.MAP_PENDING_X > 300f && HudOverlayModel.MAP_PENDING_X < 470f)
+        assertTrue(HudOverlayModel.MAP_PENDING_X + HudOverlayModel.MAP_PENDING_BAR_W / 2 < 480f)
+        assertTrue(HudOverlayModel.MAP_PENDING_BAR_Y > HudOverlayModel.MAP_PENDING_Y && HudOverlayModel.MAP_PENDING_BAR_Y + 2f <= 200f)
+        val ar = HudOverlayModel.Config(layout = HudOverlayModel.Layout.AR, mapStreets = true)
+        val turn = Directions(active = true, distance = "300 m", distanceM = 300, turn = "TURN_RIGHT")
+        assertEquals(0.4f, HudOverlayModel.frameFor(ar, turn, 0, null, mapPending = true, mapProgress = 0.4f).tbt!!.mapProgress, 0f)
     }
 
     @Test
