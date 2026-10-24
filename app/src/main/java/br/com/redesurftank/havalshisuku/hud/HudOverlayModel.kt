@@ -100,11 +100,12 @@ object HudOverlayModel {
     const val TRIP_FLAG_GAP = 4f
 
     /**
-     * Left edge of a trip line (or block) [width] wide that must end by [right]: centred on
-     * [BOX_CENTER_X] while that fits the box, else moved left (owner, 2026-10-24: long ones ran
-     * into the signs), never past [TRIP_MIN_LEFT].
+     * Left edge of a left-column line (street, maneuver row, trip line or block) [width] wide
+     * that must end by [right] (the arcs, or the box): centred on [BOX_CENTER_X] while that
+     * fits, else moved left into the HUD's free left edge (owner, 2026-10-24: long trip lines
+     * ran into the signs, the maneuver row into the arcs below 200 m), never past [TRIP_MIN_LEFT].
      */
-    fun tripLineLeft(width: Float, right: Float): Float {
+    fun columnLeft(width: Float, right: Float): Float {
         val centred = BOX_CENTER_X - width / 2
         if (centred >= BOX_LEFT && centred + width <= right) return centred
         return (right - width).coerceIn(TRIP_MIN_LEFT, maxOf(TRIP_MIN_LEFT, centred))
@@ -879,18 +880,19 @@ object HudOverlayModel {
         /** Approach chevrons above the speed (null = none). */
         val chevrons: Chevrons? = null,
         /** Text face for everything written on the HUD. */
-        val font: Font = Font.THIN
+        val font: Font = Font.LIGHT
     )
 
     /**
-     * HUD text faces, thinnest first. The head unit's fonts.xml maps sans-serif, -thin and
-     * -light all to one regular Roboto (measured 2026-10-24), so the weights are loaded from
-     * their own files in /system/fonts ([file]); the family is the fallback.
+     * HUD text faces. The head unit's fonts.xml maps sans-serif, -thin and -light all to one
+     * regular Roboto (measured 2026-10-24), so each is loaded from its own file in
+     * /system/fonts ([file]); the family is the fallback. Thin was too thin on the windshield
+     * (owner); the condensed face takes the same weight in less width.
      */
     enum class Font(val key: String, val family: String, val file: String?) {
-        THIN("thin", "sans-serif-thin", "Roboto-Thin.ttf"),
         LIGHT("light", "sans-serif-light", "Roboto-Light.ttf"),
-        REGULAR("regular", "sans-serif", null);
+        REGULAR("regular", "sans-serif", null),
+        CONDENSED("condensed", "sans-serif-condensed", "RobotoCondensed-Regular.ttf");
 
         companion object {
             fun fromKey(key: String?): Font? = entries.firstOrNull { it.key == key }
@@ -979,8 +981,8 @@ object HudOverlayModel {
         val mapStreets: Boolean = false,
         /** AR map: the grey streets as their edge lines only, instead of filled (owner option). */
         val mapEdges: Boolean = false,
-        /** The HUD's text face (owner, 2026-10-24: a very thin one by default). */
-        val font: Font = Font.THIN,
+        /** The HUD's text face (owner, 2026-10-24: Leve by default; thin was too thin). */
+        val font: Font = Font.LIGHT,
         /**
          * Next maneuver (icon, distance, street, lanes) only from this many metres; further away
          * just the trip line. 0 = always (see [SHOW_TURN_FROM_OPTIONS]).

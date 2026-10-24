@@ -326,15 +326,15 @@ class HudOverlayModelTest {
     }
 
     @Test
-    fun `trip line - centred while it fits, else moved left, never past the edge`() {
+    fun `left column lines - centred while they fit, else moved left, never past the edge`() {
         val narrow = 100f
-        assertEquals(HudOverlayModel.BOX_CENTER_X - narrow / 2, HudOverlayModel.tripLineLeft(narrow, HudOverlayModel.BOX_RIGHT), 0.01f)
+        assertEquals(HudOverlayModel.BOX_CENTER_X - narrow / 2, HudOverlayModel.columnLeft(narrow, HudOverlayModel.BOX_RIGHT), 0.01f)
         // Wider than the box: it ends at the right limit, starting further left.
         val wide = 160f
-        assertEquals(HudOverlayModel.BOX_RIGHT - wide, HudOverlayModel.tripLineLeft(wide, HudOverlayModel.BOX_RIGHT), 0.01f)
-        assertTrue(HudOverlayModel.tripLineLeft(400f, HudOverlayModel.BOX_RIGHT) >= HudOverlayModel.TRIP_MIN_LEFT)
+        assertEquals(HudOverlayModel.BOX_RIGHT - wide, HudOverlayModel.columnLeft(wide, HudOverlayModel.BOX_RIGHT), 0.01f)
+        assertTrue(HudOverlayModel.columnLeft(400f, HudOverlayModel.BOX_RIGHT) >= HudOverlayModel.TRIP_MIN_LEFT)
         // A tighter right limit (the arcs) moves a centred line left too.
-        assertTrue(HudOverlayModel.tripLineLeft(140f, 150f) + 140f <= 150f)
+        assertTrue(HudOverlayModel.columnLeft(140f, 150f) + 140f <= 150f)
     }
 
     @Test

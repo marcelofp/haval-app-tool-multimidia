@@ -302,7 +302,7 @@ class HudOverlayRenderer {
         fun full(size: Float) = size * M.TRIP_FLAG_SCALE + M.TRIP_FLAG_GAP + richWidth(trip, size)
         val room = right - M.TRIP_MIN_LEFT
         val size = if (full(wanted) > room) wanted * room / full(wanted) else wanted
-        val left = M.tripLineLeft(full(size), right)
+        val left = M.columnLeft(full(size), right)
         drawFlag(canvas, left, baseline, size * M.TRIP_FLAG_SCALE)
         drawRich(canvas, trip, left + size * M.TRIP_FLAG_SCALE + M.TRIP_FLAG_GAP, baseline, size)
     }
@@ -360,7 +360,7 @@ class HudOverlayRenderer {
             size *= k
             flag *= k
         }
-        val left = M.tripLineLeft(width(), right)
+        val left = M.columnLeft(width(), right)
         // Flag centred on the block: from the first line's cap height to the last baseline.
         val top = baselines.first() - size * 0.72f
         val mid = (top + baselines.last()) / 2
@@ -447,12 +447,12 @@ class HudOverlayRenderer {
         // Roundabout (owner, option C): the exit, at full size, until the car is on the ring;
         // then the street it leads to. Far away no street name (owner, 2026-10-24); the exit stays.
         val streetLine = if (exit != null && !(tbt.onRoundabout && tbt.street.isNotEmpty())) exit else if (far) "" else tbt.street
-        // Centred in the column; with the arcs on, narrow enough to keep clear of them.
-        fun lineMaxW(baseline: Float, size: Float) =
-            if (arcs) 2f * (M.columnRightAt(baseline, size, wideArcs) - M.BOX_CENTER_X) else M.BOX_RIGHT - M.BOX_LEFT
+        // Clear of the arcs: centred while it fits, else moved into the free left edge (M.columnLeft).
+        fun rightAt(baseline: Float, size: Float) = if (arcs) M.columnRightAt(baseline, size, wideArcs) else M.BOX_RIGHT
         if (streetLine.isNotEmpty()) {
-            val text = android.text.TextUtils.ellipsize(streetLine, streetPaint, lineMaxW(streetY, streetPaint.textSize), android.text.TextUtils.TruncateAt.END).toString()
-            canvas.drawText(text, M.BOX_CENTER_X - streetPaint.measureText(text) / 2, streetY, streetPaint)
+            val right = rightAt(streetY, streetPaint.textSize)
+            val text = android.text.TextUtils.ellipsize(streetLine, streetPaint, right - M.TRIP_MIN_LEFT, android.text.TextUtils.TruncateAt.END).toString()
+            canvas.drawText(text, M.columnLeft(streetPaint.measureText(text), right), streetY, streetPaint)
         }
         if (lanes) setTextSizes(scale * M.AR_LANES_DISTANCE_VALUE_SIZE, scale * M.AR_LANES_DISTANCE_UNIT_SIZE)
         else setTextSizes(scale * M.AR_DISTANCE_VALUE_SIZE, scale * M.AR_DISTANCE_UNIT_SIZE)
@@ -461,18 +461,35 @@ class HudOverlayRenderer {
         val exitMark = if (tbt.onRoundabout) {
             M.roundaboutExitCountdown(tbt.exitNumber, tbt.rbProgress)?.let { M.exitLabel(it) }
         } else null
-        val width = distanceWidth(tbt)
-        val exitWidth = exitMark?.let { unitPaint.measureText(it) } ?: 0f
-        val exitExtra = if (exitMark != null && width > 0f) M.EXIT_GAP + exitWidth else exitWidth
         val distanceY = when {
             lanes -> M.AR_LANES_DISTANCE_BASELINE
             far -> M.AR_DISTANCE_BASELINE - M.AR_FAR_DISTANCE_RAISE
             else -> M.AR_DISTANCE_BASELINE
         }
-        // The next turn as an icon before the distance (owner), the pair centred together.
-        val iconSize = valuePaint.textSize * M.AR_DISTANCE_ICON_SCALE
-        val iconW = if (tbt.icon.isNotEmpty() && width > 0f) iconSize + M.AR_DISTANCE_ICON_GAP else 0f
-        val x0 = M.BOX_CENTER_X - (iconW + width + exitExtra) / 2
+        // The next turn as an icon before the distance (owner), the pair centred together;
+        // under 200 m the big "110 m" ran into the arcs (owner, 2026-10-24): it moves into the
+        // free left edge first, and only shrinks when it still does not fit.
+        var width = 0f
+        var exitWidth = 0f
+        var exitExtra = 0f
+        var iconSize = 0f
+        var iconW = 0f
+        fun measure() {
+            width = distanceWidth(tbt)
+            exitWidth = exitMark?.let { unitPaint.measureText(it) } ?: 0f
+            exitExtra = if (exitMark != null && width > 0f) M.EXIT_GAP + exitWidth else exitWidth
+            iconSize = valuePaint.textSize * M.AR_DISTANCE_ICON_SCALE
+            iconW = if (tbt.icon.isNotEmpty() && width > 0f) iconSize + M.AR_DISTANCE_ICON_GAP else 0f
+        }
+        measure()
+        val right = rightAt(distanceY, valuePaint.textSize)
+        val room = right - M.TRIP_MIN_LEFT
+        if (iconW + width + exitExtra > room) {
+            val k = room / (iconW + width + exitExtra)
+            setTextSizes(valuePaint.textSize * k, unitPaint.textSize * k)
+            measure()
+        }
+        val x0 = M.columnLeft(iconW + width + exitExtra, right)
         if (iconW > 0f) {
             // Centred on the digits' height (~0.72 of the text size).
             val digitsMid = distanceY - valuePaint.textSize * 0.36f
