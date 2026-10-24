@@ -62,12 +62,16 @@ object HudMapFeed {
     /**
      * While driving (owner, 2026-10-24: the map was missing on a highway out of the usual
      * area): every [AHEAD_EVERY_M] driven, the area [AHEAD_RADIUS_M] round a point
-     * [AHEAD_POINT_M] ahead goes to the background download, so the road ahead is on disk
-     * before the car gets there. Only missing tiles go out.
+     * [AHEAD_POINT_M] ahead goes to the background download as one request, so the road ahead
+     * is on disk before the car gets there. Only missing tiles go out.
      */
     private const val AHEAD_EVERY_M = 1_500.0
     private const val AHEAD_POINT_M = 2_000.0
-    private const val AHEAD_RADIUS_M = 4_000.0
+    /**
+     * One request (~3x3 tiles): overpass-api.de took ~55 s for that on the 2026-10-24 drive, so
+     * a small box ahead every 1.5 km keeps up with ~100 km/h; a 4 km region (~9 requests) did not.
+     */
+    private const val AHEAD_RADIUS_M = 1_200.0
 
     @Volatile var lines: List<LocalRoad> = emptyList()
         private set
@@ -308,7 +312,7 @@ object HudMapFeed {
         val aLat = lat + AHEAD_POINT_M * cos(rad) / 110_540.0
         val aLon = lon + AHEAD_POINT_M * sin(rad) / (111_320.0 * cos(Math.toRadians(lat)))
         // Busy with an earlier region: ask again on the next fix.
-        if (OsmRoadStore.prefetch(aLat, aLon, AHEAD_RADIUS_M)) {
+        if (OsmRoadStore.prefetch(aLat, aLon, AHEAD_RADIUS_M, oneBox = true)) {
             aheadFromLat = lat
             aheadFromLon = lon
         }
