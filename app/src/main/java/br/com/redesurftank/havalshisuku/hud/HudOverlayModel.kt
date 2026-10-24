@@ -882,11 +882,15 @@ object HudOverlayModel {
         val font: Font = Font.THIN
     )
 
-    /** HUD text faces, thinnest first. */
-    enum class Font(val key: String, val family: String) {
-        THIN("thin", "sans-serif-thin"),
-        LIGHT("light", "sans-serif-light"),
-        REGULAR("regular", "sans-serif");
+    /**
+     * HUD text faces, thinnest first. The head unit's fonts.xml maps sans-serif, -thin and
+     * -light all to one regular Roboto (measured 2026-10-24), so the weights are loaded from
+     * their own files in /system/fonts ([file]); the family is the fallback.
+     */
+    enum class Font(val key: String, val family: String, val file: String?) {
+        THIN("thin", "sans-serif-thin", "Roboto-Thin.ttf"),
+        LIGHT("light", "sans-serif-light", "Roboto-Light.ttf"),
+        REGULAR("regular", "sans-serif", null);
 
         companion object {
             fun fromKey(key: String?): Font? = entries.firstOrNull { it.key == key }

@@ -21,6 +21,15 @@ import br.com.redesurftank.havalshisuku.hud.HudOverlayModel as M
  */
 class HudOverlayRenderer {
     private companion object {
+        private val loadedFaces = java.util.concurrent.ConcurrentHashMap<M.Font, Typeface>()
+
+        /** The face's own file when the system has it (see [M.Font]), else its family. */
+        fun typefaceFor(font: M.Font): Typeface = loadedFaces.getOrPut(font) {
+            font.file?.let { java.io.File("/system/fonts", it) }?.takeIf { it.isFile }
+                ?.let { runCatching { Typeface.createFromFile(it) }.getOrNull() }
+                ?: Typeface.create(font.family, Typeface.NORMAL)
+        }
+
         /** Native speed readout in the preview mock: centred on the arcs (measured on the car). */
         const val NATIVE_SPEED_CX = M.NATIVE_SPEED_CX
         /** Chevrons in the Telas previews: a moment with the pulse half way along the row. */
@@ -175,7 +184,7 @@ class HudOverlayRenderer {
     private fun applyFont(font: M.Font) {
         if (font == face) return
         face = font
-        val tf = Typeface.create(font.family, Typeface.NORMAL)
+        val tf = typefaceFor(font)
         for (p in listOf(valuePaint, unitPaint, tripPaint, navTripPaint, streetPaint, mapPendingPaint)) p.typeface = tf
     }
 
