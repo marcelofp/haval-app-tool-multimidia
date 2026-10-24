@@ -117,7 +117,13 @@ object HudOverlayController {
     fun setConfig(config: HudOverlayModel.Config) {
         main.post {
             configCache = config
-            // The owner's pick wins: a debug demo must not keep the HUD up past "original".
+            // The demo started from the settings keeps playing, so each change shows on it at
+            // once (owner, 2026-10-24: compare options live); its layout stays the one it was
+            // started for. Any other (debug) demo stops: the owner's pick wins.
+            if (demoDriveStartMs != 0L && demoLayout != null) {
+                publish()
+                return@post
+            }
             endDemo()
             if (wanted()) publish() else closeHosts()
         }

@@ -237,11 +237,12 @@ private fun HudLayoutCard(
 
 /** Tabs of the Navegação settings dialog. */
 /** The settings dialog's fixed height (fits the 720 px screen between the status bar and the dock). */
-private val DIALOG_HEIGHT = 400.dp
+private val DIALOG_HEIGHT = 344.dp
 
 /**
- * At most four rows per tab, so the dialog stays compact (owner). Related settings share a row
- * (the chevrons' switch and when; the two indicators). Mapa is for Navegação AR only.
+ * Three rows per tab, so the dialog stays short with no gap over the buttons (owner). Related
+ * settings share a row (navigation and its extras; the chevrons' switch and when; the two
+ * indicators). Mapa is for Navegação AR only.
  */
 private enum class HudSettingsTab(val title: String) { NAVIGATION("Navegação"), ARROW("Mapa"), BARS("Visual") }
 
@@ -302,12 +303,24 @@ private fun HudNavigationSettingsDialog(
                         Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                         when (tab) {
                             HudSettingsTab.NAVIGATION -> {
-                                OptionRow(
+                                // Navigation and what comes with it on one row (still separate settings),
+                                // so every tab has three rows and the dialog stays short (owner).
+                                val extras = buildList {
+                                    add("Distância e tempo" to config.trip)
+                                    if (layout != HudOverlayModel.Layout.AR) add("Seta menor longe" to config.smallArrowWhenFar)
+                                }
+                                SwitchTogglesRow(
                                     "Mostrar navegação",
-                                    "Seta, distância e faixas do Android Auto.",
+                                    "Do Android Auto, com:",
                                     config.navigation,
-                                    info = "Mostra a próxima manobra enquanto o Android Auto está guiando: seta, distância, faixas e a rua."
-                                ) { change(config.copy(navigation = it)) }
+                                    extras,
+                                    info = "Mostra a próxima manobra enquanto o Android Auto está guiando: seta, distância, faixas e a rua. Distância e tempo: até o destino, ex.: 4.8km · 12m." +
+                                        (if (layout != HudOverlayModel.Layout.AR) " Seta menor longe: pequena até faltar 1 km para a manobra." else ""),
+                                    onCheckedChange = { change(config.copy(navigation = it)) },
+                                    onToggle = { i, on ->
+                                        if (i == 0) change(config.copy(trip = on)) else change(config.copy(smallArrowWhenFar = on), PreviewFocus.FAR)
+                                    }
+                                )
                                 ChoiceRow(
                                     "Mostrar próxima manobra",
                                     "A partir de que distância.",
@@ -316,12 +329,6 @@ private fun HudNavigationSettingsDialog(
                                     enabled = config.navigation,
                                     info = "Mais longe que isso, a seta, a distância, a rua e as faixas da próxima manobra ficam ocultas; a distância e o tempo até o destino aparecem em duas linhas. O mapa e a seta da Navegação AR continuam na tela."
                                 ) { change(config.copy(showTurnFromM = HudOverlayModel.SHOW_TURN_FROM_OPTIONS[it]), PreviewFocus.FAR) }
-                                OptionRow(
-                                    "Distância e tempo restantes",
-                                    "Até o destino, ex.: 4.8km · 12m.",
-                                    config.trip,
-                                    enabled = config.navigation
-                                ) { change(config.copy(trip = it)) }
                                 // Both chevron settings on one row: the switch, and when (owner: two settings).
                                 SwitchChoiceRow(
                                     "Setas de aproximação",
@@ -387,16 +394,6 @@ private fun HudNavigationSettingsDialog(
                                     HudOverlayModel.Font.entries.indexOf(config.font),
                                     info = "Leve é a mais discreta no para-brisa; Normal, a mais fácil de ler sob sol forte; Condensada tem o peso da Normal em menos largura."
                                 ) { change(config.copy(font = HudOverlayModel.Font.entries[it])) }
-                                // The AR arrow already shows distance by itself (straight when far).
-                                if (layout != HudOverlayModel.Layout.AR) {
-                                    OptionRow(
-                                        "Seta menor quando longe",
-                                        "Pequena até faltar 1 km.",
-                                        config.smallArrowWhenFar,
-                                        enabled = config.navigation,
-                                        info = "A seta fica pequena até faltar 1 km para a manobra; depois fica grande."
-                                    ) { change(config.copy(smallArrowWhenFar = it), PreviewFocus.FAR) }
-                                }
                             }
                         }
                         }
@@ -453,9 +450,10 @@ private fun DemoDriveButton(layout: HudOverlayModel.Layout, modifier: Modifier =
         onClick = { HudOverlayController.setDemoDrive(!running, layout) },
         enabled = enabled,
         modifier = modifier,
+        // Amber while it plays (owner): the settings stay live on it, so it reads as "on air".
         colors = ButtonDefaults.buttonColors(
-            containerColor = ImpTokens.Accent,
-            contentColor = Color.White,
+            containerColor = if (running) ImpTokens.Attention else ImpTokens.Accent,
+            contentColor = if (running) ImpTokens.OnAccent else Color.White,
             disabledContainerColor = ImpTokens.TrackOff,
             disabledContentColor = ImpTokens.TextMuted
         )
@@ -570,6 +568,29 @@ private fun SwitchChoiceRow(
         Switch(
             checked = checked,
             enabled = enabled,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = ImpTokens.Accent),
+            modifier = Modifier.padding(start = 10.dp)
+        )
+    }
+}
+
+/** An on/off option with independent extras as chips beside it (greyed out while it is off). */
+@Composable
+private fun SwitchTogglesRow(
+    title: String,
+    description: String,
+    checked: Boolean,
+    toggles: List<Pair<String, Boolean>>,
+    info: String? = null,
+    onCheckedChange: (Boolean) -> Unit,
+    onToggle: (Int, Boolean) -> Unit
+) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        OptionText(title, description, true, info, Modifier.weight(1f))
+        Chips(toggles.map { it.first }, { toggles[it].second }, checked) { onToggle(it, !toggles[it].second) }
+        Switch(
+            checked = checked,
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = ImpTokens.Accent),
             modifier = Modifier.padding(start = 10.dp)
