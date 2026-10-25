@@ -526,9 +526,11 @@ class HudArArrowTest {
         val leftFlag = leftShape.flag!!
         val rightFlag = rightShape.flag!!
         assertTrue(leftFlag.x < HudArArrow.CX && rightFlag.x > HudArArrow.CX)
-        // Outside the arrow head, not on the centreline of the road. Pennant flies away from it.
-        assertTrue(leftFlag.x < leftShape.head[2])
-        assertTrue(rightFlag.x > rightShape.head[4])
+        // No head on the last stretch: the route ends at the flag, which stands outside the road's
+        // own edge, not on its centreline. Pennant flies away from it.
+        assertTrue(leftShape.head.isEmpty() && rightShape.head.isEmpty())
+        assertTrue(leftFlag.x < leftShape.blue.last().lx && leftFlag.x < leftShape.blue.last().rx)
+        assertTrue(rightFlag.x > rightShape.blue.last().rx && rightFlag.x > rightShape.blue.last().lx)
         assertEquals(-1, leftFlag.pennant)
         assertEquals(1, rightFlag.pennant)
         assertTrue(leftFlag.y in HudArArrow.TOP..HudArArrow.BOTTOM)

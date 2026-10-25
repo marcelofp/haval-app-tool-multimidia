@@ -678,6 +678,8 @@ object HudOverlayModel {
         return right
     }
     const val CHEVRON_HALF_H = 7f
+    /** The map/arrow's destination flag shows from this far (owner, 2026-10-25). */
+    const val DEST_FLAG_SHOW_M = 150f
     /** Margin each chevron clears in the text under it, so it reads as on top. */
     const val CHEVRON_CUT_MARGIN = 1.5f
     const val CHEVRON_W = 7f
@@ -795,7 +797,9 @@ object HudOverlayModel {
         val tripDistance: String = "",
         val tripTime: String = "",
         /** AR map: grey streets as edge lines ([Config.mapEdges]). */
-        val mapEdges: Boolean = false
+        val mapEdges: Boolean = false,
+        /** Google style ([Config.iconStyle]): the Material Symbols icon to draw; null = ours. */
+        val googleIcon: String? = null
     ) {
         /** Draw the roundabout with its real exit instead of the static icon. */
         val dynamicRoundabout: Boolean get() = icon == "ROUNDABOUT" && exitAngle != null
@@ -902,6 +906,44 @@ object HudOverlayModel {
         val font: Font = Font.LIGHT
     )
 
+    /** Maneuver icon sets (owner, 2026-10-25: choose between them). */
+    enum class IconStyle(val key: String) {
+        CLASSIC("classic"),
+        GOOGLE("google");
+
+        companion object {
+            fun fromKey(key: String?): IconStyle? = entries.firstOrNull { it.key == key }
+        }
+    }
+
+    /**
+     * Google's icon (Material Symbols name) for a maneuver token, as Google Maps shows it: its
+     * own icons for sharp turns, forks, ramps and either side's U-turn. Null for the destination
+     * (the checkered flag, as on the trip line) and tokens with no icon.
+     */
+    fun googleIcon(turn: String?, clockwise: Boolean = false): String? {
+        val t = turn.orEmpty().uppercase()
+        val side = when {
+            t.endsWith("_RIGHT") -> "right"
+            t.endsWith("_LEFT") -> "left"
+            else -> null
+        }
+        return when {
+            t.isEmpty() || t.startsWith("DESTINATION") -> null
+            t.startsWith("ROUNDABOUT") -> if (clockwise) "roundabout_left" else "roundabout_right"
+            t.startsWith("U_TURN") -> "u_turn_${side ?: "left"}"
+            t.startsWith("MERGE") -> "merge"
+            t == "STRAIGHT" || t == "NAME_CHANGE" || t == "DEPART" || t.startsWith("FERRY") -> "straight"
+            side == null -> null
+            t.startsWith("SHARP") -> "turn_sharp_$side"
+            t.startsWith("TURN") -> "turn_$side"
+            t.startsWith("SLIGHT") || t.startsWith("KEEP") -> "turn_slight_$side"
+            t.startsWith("FORK") -> "fork_$side"
+            t.startsWith("OFF_RAMP") || t.startsWith("ON_RAMP") -> "ramp_$side"
+            else -> null
+        }
+    }
+
     /**
      * HUD text faces. The head unit's fonts.xml maps sans-serif, -thin and -light all to one
      * regular Roboto (measured 2026-10-24), so each is loaded from its own file in
@@ -1002,6 +1044,8 @@ object HudOverlayModel {
         val mapEdges: Boolean = false,
         /** The HUD's text face (owner, 2026-10-24: Leve by default; thin was too thin). */
         val font: Font = Font.LIGHT,
+        /** Maneuver icons: our bold arrows, or Google's (Material Symbols) as in Google Maps. */
+        val iconStyle: IconStyle = IconStyle.CLASSIC,
         /**
          * Next maneuver (icon, distance, street, lanes) only from this many metres; further away
          * just the trip line. 0 = always (see [SHOW_TURN_FROM_OPTIONS]).
@@ -1093,6 +1137,7 @@ object HudOverlayModel {
             // With the maneuver hidden the trip line is all there is, so it stays.
             trip = if (config.trip && (icon != "DESTINATION" || hidden)) tripLabel(d.remainingM, d.remainingS) else "",
             turnHidden = hidden,
+            googleIcon = if (config.iconStyle == IconStyle.GOOGLE) googleIcon(d.turn, d.roundaboutClockwise == true) else null,
             tripDistance = if (config.trip) tripParts(d.remainingM, d.remainingS).first.orEmpty() else "",
             tripTime = if (config.trip) tripParts(d.remainingM, d.remainingS).second.orEmpty() else "",
             arAngle = arAngle.takeIf { style == TbtStyle.AR },

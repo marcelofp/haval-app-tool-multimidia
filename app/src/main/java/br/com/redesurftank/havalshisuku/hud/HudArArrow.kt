@@ -288,13 +288,18 @@ object HudArArrow {
             val tip = mapProject(end.x + d.x * MAP_HEAD_L_M, end.z + d.z * MAP_HEAD_L_M, horizon)
             val l = mapProject(end.x - d.z * MAP_HEAD_HALF_M, end.z + d.x * MAP_HEAD_HALF_M, horizon)
             val r = mapProject(end.x + d.z * MAP_HEAD_HALF_M, end.z - d.x * MAP_HEAD_HALF_M, horizon)
-            if (tip != null && l != null && r != null) head = floatArrayOf(tip.first, tip.second, l.first, l.second, r.first, r.second)
+            // Arriving: no head (owner, 2026-10-25), the route ends at the flag.
+            if (destSide == null && tip != null && l != null && r != null) head = floatArrayOf(tip.first, tip.second, l.first, l.second, r.first, r.second)
             if (destSide != null) {
                 val height = MAP_FLAG_H_M * mapPxPerM(end.z, horizon)
                 flag = if (destSide == 0) {
                     // Side not in the maneuver: just past the head, on the road.
                     val ahead = MAP_HEAD_L_M + 4f
                     mapProject(end.x + d.x * ahead, end.z + d.z * ahead, horizon)?.let { (fx, fy) -> Flag(fx, fy, height) }
+                } else if (blue.isNotEmpty()) {
+                    // At the drawn road's own edge (there is no head to clear any more).
+                    val e = blue.last()
+                    flagBeside(e.lx to e.ly, e.rx to e.ry, null, destSide, end.z, horizon, height)
                 } else if (l != null && r != null) {
                     // Same side as the arrow ([destination]): outside the head and the drawn road.
                     // A metre offset sits inside the head (it is wider than the street) and, far
@@ -561,11 +566,12 @@ object HudArArrow {
         }
         line += W(0f, zc)
         val blue = ribbon(line, HW, AHEAD).lastOrNull().orEmpty()
-        // Outside the head, which is wider than the ribbon; side 0 stays on the road past the head.
-        val fx = if (side == 0) 0f else side * (max(HW, HEAD_HW) + FLAG_GAP)
-        val fz = if (side == 0) zc + HEAD_L + 0.6f else zc
+        // No head on the last stretch (owner, 2026-10-25): the route ends at the flag, which
+        // stands at the road's edge; side 0 stays on the road just past the end.
+        val fx = if (side == 0) 0f else side * (HW + FLAG_GAP)
+        val fz = if (side == 0) zc + 0.6f else zc
         val (sx, sy) = project(fx, fz)
-        return fit(Shape(blue, head(line, AHEAD), flag = Flag(sx, sy, FLAG_H * F_X / fz, pennant = if (side < 0) -1 else 1)), placement)
+        return fit(Shape(blue, FloatArray(0), flag = Flag(sx, sy, FLAG_H * F_X / fz, pennant = if (side < 0) -1 else 1)), placement)
     }
 
     /** Cubic from [p0] heading [d0] to [p3] heading [d3], without [p0]. */

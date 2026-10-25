@@ -206,20 +206,21 @@ class OsmRoadsTest {
         val (x1, y1) = HudArArrow.mapProject(5f, 50f)!!
         val (x2, y2) = HudArArrow.mapProject(5f, 300f)!!
         assertEquals((x1 - HudArArrow.CX) / (y1 - HudArArrow.MAP_HORIZON_Y), (x2 - HudArArrow.CX) / (y2 - HudArArrow.MAP_HORIZON_Y), 0.001f)
-        // Arriving on the right: the pole is outside the arrow head and the drawn street, not in
-        // the middle of either (the head is wider than the street; far away the street is widened).
+        // Arriving on the right: no head (the route ends at the flag), and the pole is outside the
+        // drawn street, not in its middle (far away the street is widened).
         val arrive = RoutePath.route(roads, 250f, 0f)!!
         val sceneR = HudArArrow.mapScene(roads, arrive.pts, 1)
         val flag = sceneR.flag!!
-        assertTrue(flag.x > maxOf(sceneR.head[4], sceneR.blue.last().rx))
+        assertTrue(sceneR.head.isEmpty())
+        assertTrue(flag.x > sceneR.blue.last().rx)
         assertEquals(1, flag.pennant)
         val sceneL = HudArArrow.mapScene(roads, arrive.pts, -1)
         val left = sceneL.flag!!
-        assertTrue(left.x < minOf(sceneL.head[2], sceneL.blue.last().lx))
+        assertTrue(left.x < sceneL.blue.last().lx)
         assertEquals(-1, left.pennant)
         val farRoad = listOf(LocalRoad(floatArrayOf(0f, -20f, 0f, 650f), 1f))
         val farRoute = RoutePath.route(farRoad, 550f, 0f)!!
         val far = HudArArrow.mapScene(farRoad, farRoute.pts, 1, HudArArrow.MAP_HORIZON_TOP_Y)
-        assertTrue(far.flag!!.x > maxOf(far.head[4], far.blue.last().rx))
+        assertTrue(far.flag!!.x > far.blue.last().rx)
     }
 }

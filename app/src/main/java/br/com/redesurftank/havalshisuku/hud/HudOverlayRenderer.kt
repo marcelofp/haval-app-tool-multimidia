@@ -728,7 +728,8 @@ class HudOverlayRenderer {
         fadeSides(canvas, left, right, top, HudArArrow.CX, edge = if (map) 0 else 60, keep = if (map) 0.16f else 0.32f)
         canvas.restore() // layer
         canvas.restore() // transform + clip
-        shape.flag?.let { drawArFlag(canvas, it, cx, sx, sy, opacity) }
+        // The flag only in the last stretch (owner, 2026-10-25): further out it just competes.
+        if (meters <= M.DEST_FLAG_SHOW_M) shape.flag?.let { drawArFlag(canvas, it, cx, sx, sy, opacity) }
     }
 
     private val mapPendingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -912,6 +913,15 @@ class HudOverlayRenderer {
                 tbt.roundaboutClockwise, tbt.exitNumber
             )
             return top + (M.RB_ENTRY_BOTTOM + M.RB_STROKE / 2) / 24f * size
+        }
+        // Google style: its Material Symbols icon (the dynamic ring and the flag stay ours).
+        tbt.googleIcon?.let { HudTbtIcons.googlePath(it, size) }?.let { g ->
+            canvas.save()
+            canvas.translate(left, top)
+            canvas.drawPath(g, fill)
+            canvas.restore()
+            g.computeBounds(arrowBounds, true)
+            return top + arrowBounds.bottom
         }
         if (icon == "SLIGHT_RIGHT" || icon == "SLIGHT_LEFT") {
             // The straight arrow turned 45 deg to the side (see M.hudIcon).

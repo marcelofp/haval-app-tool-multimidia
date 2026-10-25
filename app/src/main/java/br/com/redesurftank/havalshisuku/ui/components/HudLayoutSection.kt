@@ -244,7 +244,7 @@ private val DIALOG_HEIGHT = 344.dp
  * settings share a row (navigation and its extras; the chevrons' switch and when; the two
  * indicators). Mapa is for Navegação AR only.
  */
-private enum class HudSettingsTab(val title: String) { NAVIGATION("Navegação"), ARROW("Mapa"), BARS("Visual") }
+private enum class HudSettingsTab(val title: String) { NAVIGATION("Navegação"), ARROW("Mapa"), BARS("Indicadores"), STYLE("Estilo") }
 
 /**
  * Wide two-pane dialog for the 1920x720 head unit: the options on the left split into tabs so
@@ -387,6 +387,8 @@ private fun HudNavigationSettingsDialog(
                                 ) { i, on ->
                                     change(if (i == 0) config.copy(powerBar = on) else config.copy(rpmBar = on), PreviewFocus.GAUGES)
                                 }
+                            }
+                            HudSettingsTab.STYLE -> {
                                 ChoiceRow(
                                     "Fonte",
                                     "Texto no HUD.",
@@ -394,6 +396,14 @@ private fun HudNavigationSettingsDialog(
                                     HudOverlayModel.Font.entries.indexOf(config.font),
                                     info = "Leve é a mais discreta no para-brisa; Normal, a mais fácil de ler sob sol forte; Condensada tem o peso da Normal em menos largura."
                                 ) { change(config.copy(font = HudOverlayModel.Font.entries[it])) }
+                                ChoiceRow(
+                                    "Ícones das manobras",
+                                    "Nossos ou os do Google Maps.",
+                                    listOf("Clássicos", "Google"),
+                                    HudOverlayModel.IconStyle.entries.indexOf(config.iconStyle),
+                                    enabled = config.navigation,
+                                    info = "Clássicos: setas cheias, grossas. Google: os ícones do Google Maps (Material Symbols), com ícones próprios para curva fechada, bifurcação, saída e retorno. A rotatória com a saída desenhada e a bandeira do destino são as mesmas nos dois."
+                                ) { change(config.copy(iconStyle = HudOverlayModel.IconStyle.entries[it])) }
                             }
                         }
                         }
