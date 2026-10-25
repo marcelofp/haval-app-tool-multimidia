@@ -40,8 +40,12 @@ class HudOverlayRenderer {
         const val FLAG_R = 21f
         const val FLAG_B = 14f
         /** The destination flag on the map/arrow: size factor, largest size, and alpha (min + span x arrow opacity). */
-        const val AR_FLAG_SCALE = 0.85f
-        const val AR_FLAG_MAX = 30f
+        const val AR_FLAG_SCALE = 0.6f
+        const val AR_FLAG_MIN = 8f
+        const val AR_FLAG_MAX = 20f
+        /** Its pole and outline, in the flag's 24 box (the white trip flag: 2.6 and 0.7). */
+        const val AR_FLAG_POLE = 1.6f
+        const val AR_FLAG_OUTLINE = 0.45f
         const val AR_FLAG_ALPHA_MIN = 0.3f
         const val AR_FLAG_ALPHA_SPAN = 0.5f
         /** Map view roads: soft grey under the blue route. */
@@ -404,16 +408,36 @@ class HudOverlayRenderer {
     }
 
     /** Destination flag in a [size] square standing on [baseline]: a pole and a pennant. */
-    private fun drawFlag(canvas: Canvas, left: Float, baseline: Float, size: Float) {
+    private fun drawFlag(
+        canvas: Canvas,
+        left: Float,
+        baseline: Float,
+        size: Float,
+        pole: Paint = flagPole,
+        outline: Paint = flagOutline,
+        checks: Paint = flagFill
+    ) {
         val s = size / 24f
         canvas.save()
         canvas.translate(left, baseline - size)
         canvas.scale(s, s)
-        canvas.drawLine(5f, 3f, 5f, 23f, flagPole)
-        canvas.drawRect(FLAG_L, FLAG_T, FLAG_R, FLAG_B, flagOutline)
-        canvas.drawPath(flagChecks, flagFill)
+        canvas.drawLine(5f, 3f, 5f, 23f, pole)
+        canvas.drawRect(FLAG_L, FLAG_T, FLAG_R, FLAG_B, outline)
+        canvas.drawPath(flagChecks, checks)
         canvas.restore()
     }
+
+    // The map's flag (owner, 2026-10-25): in the route's own blue, so it reads as part of the road
+    // and not as the white trip flag on the left; thinner pole and outline, it is small.
+    private val arFlagPole = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        strokeWidth = AR_FLAG_POLE
+        strokeCap = Paint.Cap.ROUND
+    }
+    private val arFlagOutline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = AR_FLAG_OUTLINE
+    }
+    private val arFlagChecks = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
 
     private val navTripPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(217, 255, 255, 255)
@@ -794,7 +818,7 @@ class HudOverlayRenderer {
         val y = HudArArrow.BOTTOM - (HudArArrow.BOTTOM - flag.y) * sy
         if (y <= M.CHEVRON_CY || y > HudArArrow.BOTTOM) return
         // Smaller and see-through (owner): it marks the spot, it should not cover the road.
-        val size = (flag.height * kotlin.math.sqrt(sx * sy) * AR_FLAG_SCALE).coerceIn(10f, minOf(AR_FLAG_MAX, y - 40f))
+        val size = (flag.height * kotlin.math.sqrt(sx * sy) * AR_FLAG_SCALE).coerceIn(AR_FLAG_MIN, minOf(AR_FLAG_MAX, y - 40f))
         // The pennant flies away from the road: keep that side of it on the panel.
         val x = if (flag.pennant < 0) raw.coerceAtLeast(size * 0.7f) else raw.coerceAtMost(480f - size * 0.7f)
         canvas.saveLayerAlpha(x - size, y - size - 2f, x + size, y + 2f, (255 * (AR_FLAG_ALPHA_MIN + AR_FLAG_ALPHA_SPAN * opacity)).toInt().coerceIn(0, 255))
@@ -804,8 +828,12 @@ class HudOverlayRenderer {
             canvas.scale(-1f, 1f)
             canvas.translate(-x, 0f)
         }
-        // drawFlag's pole runs at x 5, y 3..23 of its 24 box: stand it on (x, y).
-        drawFlag(canvas, x - 5f * size / 24f, y + size / 24f, size)
+        // drawFlag's pole runs at x 5, y 3..23 of its 24 box: stand it on (x, y). Route blue.
+        val blue = arRgb(y)
+        arFlagPole.color = blue
+        arFlagOutline.color = blue
+        arFlagChecks.color = blue
+        drawFlag(canvas, x - 5f * size / 24f, y + size / 24f, size, arFlagPole, arFlagOutline, arFlagChecks)
         canvas.restore()
         canvas.restore()
     }
