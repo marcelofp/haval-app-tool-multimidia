@@ -174,6 +174,20 @@ object AndroidAutoClusterController {
 
     fun snapshotDirectionsJson(): String = directionsPublisher.lastJson()
 
+    /** Whether the cluster theme gets the turn-by-turn ([SharedPreferencesKeys.CLUSTER_SHOW_NAVIGATION]). */
+    fun navigationShownOnTheme(): Boolean =
+        br.com.redesurftank.App.getDeviceProtectedContext()
+            .getSharedPreferences("haval_prefs", android.content.Context.MODE_PRIVATE)
+            .getBoolean(br.com.redesurftank.havalshisuku.models.SharedPreferencesKeys.CLUSTER_SHOW_NAVIGATION.key, true)
+
+    /** "No navigation", as a theme sees it while [navigationShownOnTheme] is off. */
+    val INACTIVE_DIRECTIONS_JSON: String by lazy { AndroidAutoNavigationTelemetry.inactive().toJson() }
+
+    /** Re-sends the current directions, so the theme follows a change of [navigationShownOnTheme] at once. */
+    fun republishDirections() {
+        ServiceManager.getInstance().dispatchTelemetryOnly(AndroidAutoTelemetryKeys.DIRECTIONS, snapshotDirectionsJson())
+    }
+
     fun peekSurface(): Surface? = AaClusterVideoHost.peekSurface()
 
     private val navigationEndedRunnable = Runnable {

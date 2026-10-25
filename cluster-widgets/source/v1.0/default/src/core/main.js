@@ -708,6 +708,8 @@ async function initDecentralizedBridge() {
     bridge.bindThemeSetting('gaugeStyle', 'Esportivo', setState);
     bridge.bindThemeSetting('barImages', true, setState);
     bridge.bindThemeSetting('navigationDisplayMode', 'Mapa', setState);
+    // The turn-by-turn card (owner, 2026-10-25); the app has its own switch for every theme too.
+    bridge.bindThemeSetting('showNavigationCard', true, setState);
     bridge.bindThemeSetting('appDisplayMode', 'Normal', setState);
     bridge.bindThemeSetting('display', 'Normal', setState);
     bridge.bindThemeSetting('accentColor', DEFAULT_ACCENT, setState);

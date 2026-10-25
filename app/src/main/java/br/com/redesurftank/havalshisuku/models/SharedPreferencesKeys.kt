@@ -429,6 +429,9 @@ enum class SharedPreferencesKeys(val key: String, val description: String) {
     HUD_AR_MAP_EDGES("hudArMapEdges", "HUD Navegação AR: ruas do mapa só com as bordas (contorno)"),
     HUD_NAV_SHOW_TURN_FROM_M("hudNavShowTurnFromM", "HUD: mostrar a próxima manobra só a partir de N metros (0 = sempre)"),
     // Alerta de radar (Recursos). Read through RadarSettings.
+    // The theme's turn-by-turn card (owner, 2026-10-25). Off: the theme gets "no navigation";
+    // the radar and the HUD still read the real directions.
+    CLUSTER_SHOW_NAVIGATION("clusterShowNavigation", "Painel: mostrar a navegação do Android Auto no tema (card de curva a curva)"),
     RADAR_ENABLED("radarEnabled", "Alerta de radar: ativo"),
     RADAR_SHOW_HUD("radarShowHud", "Alerta de radar: mostrar no HUD"),
     RADAR_SHOW_THEME("radarShowTheme", "Alerta de radar: mostrar no tema do cluster"),

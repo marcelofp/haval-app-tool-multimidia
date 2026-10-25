@@ -5,6 +5,8 @@ import android.util.Log
 import br.com.redesurftank.App
 import br.com.redesurftank.havalshisuku.managers.ServiceManager
 import br.com.redesurftank.havalshisuku.managers.DisplayAppLauncher
+import br.com.redesurftank.havalshisuku.managers.AndroidAutoClusterController
+import br.com.redesurftank.havalshisuku.managers.AndroidAutoTelemetryKeys
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -526,9 +528,19 @@ class ThemeBridgeImpl(private val context: IBridgeContext) {
 
     private fun readAppTelemetry(canonicalKey: String): String {
         val cached = ServiceManager.getInstance().peekCachedData(canonicalKey)
-        if (!cached.isNullOrEmpty()) return cached
-        return VirtualTelemetryManager.getVirtualValue(App.getContext(), canonicalKey)
+        if (!cached.isNullOrEmpty()) return forTheme(canonicalKey, cached)
+        return forTheme(canonicalKey, VirtualTelemetryManager.getVirtualValue(App.getContext(), canonicalKey))
     }
+
+    /**
+     * What the theme may see of [canonicalKey]: with "Navegação do Android Auto no painel" off
+     * (owner, 2026-10-25) the directions read as inactive, the existing "no navigation" value,
+     * so every theme hides its turn-by-turn card. Only the theme: radar and HUD keep the real ones.
+     */
+    private fun forTheme(canonicalKey: String, value: String): String =
+        if (canonicalKey == AndroidAutoTelemetryKeys.DIRECTIONS && !AndroidAutoClusterController.navigationShownOnTheme())
+            AndroidAutoClusterController.INACTIVE_DIRECTIONS_JSON
+        else value
 
     @JavascriptInterface
     fun launchApp(packageName: String, displayId: Int) {
@@ -638,7 +650,8 @@ class ThemeBridgeImpl(private val context: IBridgeContext) {
         return JSONArray(keys).toString()
     }
 
-    fun pushOnDataChanged(key: String, value: String) {
+    fun pushOnDataChanged(key: String, rawValue: String) {
+        val value = forTheme(BridgeContractTranslator.translateThemeKeyToCanonical(key), rawValue)
         val quotedValue = JSONObject.quote(value)
         val webView = context.webView ?: return
         Log.d(TAG, "[DIAG] pushOnDataChanged: key=$key value=$value")

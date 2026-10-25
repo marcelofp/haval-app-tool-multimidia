@@ -1183,6 +1183,8 @@ async function initMinimalistBridge() {
     bindSetting('showRpmIcon', true);
     bindSetting('showTractionIcon', true);
     bindSetting('navigationDisplayMode', 'Clean');
+    // The turn-by-turn card (owner, 2026-10-25); the app has its own switch for every theme too.
+    bindSetting('showNavigationCard', true);
     bindSetting('appDisplayMode', 'Reduzido');
     bindSetting('display', 'Normal');
 

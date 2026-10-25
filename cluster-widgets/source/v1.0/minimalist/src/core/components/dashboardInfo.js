@@ -431,7 +431,10 @@ export function createDashboardInfo() {
     // Turn-by-turn card, shared with the default theme (shared/tbt/tbtCard.js).
     const tbtCard = createTbtCard();
     container.appendChild(tbtCard.element);
-    const updateTbtStrip = () => tbtCard.update(getState('navigationDirections'));
+    // "Exibir Card de Navegação" off: the card reads no navigation (the radar still shows).
+    const updateTbtStrip = () => tbtCard.update(
+        getState('showNavigationCard') === false ? { active: false } : getState('navigationDirections')
+    );
     updateTbtStrip();
     tbtCard.setRadar(getState('radarAlert'));
 
@@ -497,6 +500,7 @@ export function createDashboardInfo() {
     const subscriptions = [
         subscribe('cardId', updateCardTitle),
         subscribe('navigationDirections', updateTbtStrip),
+        subscribe('showNavigationCard', updateTbtStrip),
         subscribe('radarAlert', radar => tbtCard.setRadar(radar)),
         subscribe('projectionMirrorInDash', updateTbtStrip),
         subscribe('carPlayInDash', updateTbtStrip),
