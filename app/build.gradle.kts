@@ -179,8 +179,12 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation("org.json:json:20231013")
     androidTestImplementation(libs.junit)
-    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation(platform(libs.compose.bom))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    // Older Espresso calls InputManager.getInstance, gone on Android 16 (the emulator image).
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     debugImplementation(libs.ui.tooling)
     debugImplementation(libs.ui.test.manifest)
 }

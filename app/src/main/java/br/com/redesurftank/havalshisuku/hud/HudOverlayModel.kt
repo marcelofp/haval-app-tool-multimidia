@@ -917,9 +917,11 @@ object HudOverlayModel {
     }
 
     /**
-     * Google's icon (Material Symbols name) for a maneuver token, as Google Maps shows it: its
-     * own icons for sharp turns, forks, ramps and either side's U-turn. Null for the destination
-     * (the checkered flag, as on the trip line) and tokens with no icon.
+     * Google's icon (Material Symbols name) for a maneuver token: its own icons for ramps and
+     * either side's U-turn. Sharp turns take the normal turn, and forks our slight turn with the
+     * road going on (see HudTbtIcons): the library's sharp (a step) and fork glyphs read wrong
+     * (owner, 2026-10-25, until checked against Google Maps itself). Null for the destination (the checkered flag, as on the trip
+     * line) and tokens with no icon.
      */
     fun googleIcon(turn: String?, clockwise: Boolean = false): String? {
         val t = turn.orEmpty().uppercase()
@@ -935,8 +937,7 @@ object HudOverlayModel {
             t.startsWith("MERGE") -> "merge"
             t == "STRAIGHT" || t == "NAME_CHANGE" || t == "DEPART" || t.startsWith("FERRY") -> "straight"
             side == null -> null
-            t.startsWith("SHARP") -> "turn_sharp_$side"
-            t.startsWith("TURN") -> "turn_$side"
+            t.startsWith("SHARP") || t.startsWith("TURN") -> "turn_$side"
             t.startsWith("SLIGHT") || t.startsWith("KEEP") -> "turn_slight_$side"
             t.startsWith("FORK") -> "fork_$side"
             t.startsWith("OFF_RAMP") || t.startsWith("ON_RAMP") -> "ramp_$side"

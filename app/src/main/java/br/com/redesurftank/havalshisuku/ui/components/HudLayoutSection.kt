@@ -251,8 +251,9 @@ private enum class HudSettingsTab(val title: String) { NAVIGATION("Navegação")
  * each fits without scrolling, live preview on the right. (A tall single column got clipped on
  * this screen, with the bar switches drawn on top of each other.)
  */
+/** Internal (not private) so androidTest/HudSettingsRenderTest can open it on an emulator. */
 @Composable
-private fun HudNavigationSettingsDialog(
+internal fun HudNavigationSettingsDialog(
     layout: HudOverlayModel.Layout,
     config: HudOverlayModel.Config,
     onChange: (HudOverlayModel.Config) -> Unit,

@@ -383,9 +383,9 @@ class HudOverlayModelTest {
     }
 
     @Test
-    fun `Google icons - own icons for sharp, fork, ramp and either U-turn, destination keeps the flag`() {
+    fun `Google icons - ramps and either U-turn, sharp as turn, fork as slight plus straight on, destination keeps the flag`() {
         val m = mapOf(
-            "TURN_RIGHT" to "turn_right", "TURN_LEFT" to "turn_left", "SHARP_RIGHT" to "turn_sharp_right",
+            "TURN_RIGHT" to "turn_right", "TURN_LEFT" to "turn_left", "SHARP_RIGHT" to "turn_right",
             "SLIGHT_LEFT" to "turn_slight_left", "KEEP_RIGHT" to "turn_slight_right", "FORK_LEFT" to "fork_left",
             "OFF_RAMP_RIGHT" to "ramp_right", "ON_RAMP_LEFT" to "ramp_left", "U_TURN_RIGHT" to "u_turn_right",
             "U_TURN_LEFT" to "u_turn_left", "MERGE" to "merge", "MERGE_LEFT" to "merge", "STRAIGHT" to "straight",
@@ -399,7 +399,7 @@ class HudOverlayModelTest {
         val d = Directions(active = true, distance = "150 m", distanceM = 150, turn = "SHARP_LEFT")
         assertNull(HudOverlayModel.tbtFor(d)!!.googleIcon)
         val g = HudOverlayModel.tbtFor(d, HudOverlayModel.Config(iconStyle = HudOverlayModel.IconStyle.GOOGLE))!!
-        assertEquals("turn_sharp_left", g.googleIcon)
+        assertEquals("turn_left", g.googleIcon)
         assertEquals("TURN_LEFT", g.icon)
     }
 }
