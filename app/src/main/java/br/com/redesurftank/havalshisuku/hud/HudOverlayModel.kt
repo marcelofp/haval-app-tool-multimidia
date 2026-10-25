@@ -233,6 +233,8 @@ object HudOverlayModel {
     // Turn hidden (further than "Mostrar próxima manobra"): the trip on two lines, distance over
     // time, with the flag on the left centred on both (owner, 2026-10-24). At the trip line's own
     // size and place, the time on its baseline (owner, 2026-10-25: it came out big and moved).
+    /** The two lines are this much bigger than the one-line trip (owner, 2026-10-25: +2). */
+    const val TRIP_BLOCK_EXTRA_SIZE = 2f
     /** Second line to first: this many text sizes up. */
     const val TRIP_BLOCK_LINE_STEP = 1.25f
     /** The flag, against the text size (it spans both lines). */
@@ -545,6 +547,8 @@ object HudOverlayModel {
     /** "Sempre": how far ahead the road's bend is read, and the most the arrow turns for it. */
     const val CHEVRON_ROAD_AHEAD_M = 60f
     const val CHEVRON_ROAD_MAX_DEG = 60f
+    /** ...turning this many times the bend: a soft corner's 10-20 deg barely showed (owner, 2026-10-25). */
+    const val CHEVRON_ROAD_GAIN = 2f
 
     /**
      * The bend (degrees, + right) of the matched [route] (car frame metres, x right, y ahead)
@@ -569,7 +573,7 @@ object HudOverlayModel {
         val start = heading(at(0f) ?: return null, at(15f) ?: return null)
         val ahead = heading(at(CHEVRON_ROAD_AHEAD_M - 15f) ?: return null, at(CHEVRON_ROAD_AHEAD_M + 15f) ?: return null)
         val bend = ((ahead - start) % 360f + 540f) % 360f - 180f
-        return bend.coerceIn(-CHEVRON_ROAD_MAX_DEG, CHEVRON_ROAD_MAX_DEG)
+        return (bend * CHEVRON_ROAD_GAIN).coerceIn(-CHEVRON_ROAD_MAX_DEG, CHEVRON_ROAD_MAX_DEG)
     }
 
     /**
@@ -1049,9 +1053,10 @@ object HudOverlayModel {
         val iconStyle: IconStyle = IconStyle.CLASSIC,
         /**
          * Next maneuver (icon, distance, street, lanes) only from this many metres; further away
-         * just the trip line. 0 = always (see [SHOW_TURN_FROM_OPTIONS]).
+         * just the trip line. 0 = always (see [SHOW_TURN_FROM_OPTIONS]). Default 1 km (owner,
+         * 2026-10-25); a saved choice keeps its own value.
          */
-        val showTurnFromM: Int = 0
+        val showTurnFromM: Int = 1000
     ) {
         val active: Boolean get() = layout != Layout.ORIGINAL
 

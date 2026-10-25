@@ -351,10 +351,12 @@ class HudOverlayModelTest {
     }
 
     @Test
-    fun `show next turn from - hidden further away, trip line stays, always by default`() {
+    fun `show next turn from - hidden further away, trip line stays, 1 km by default`() {
         val far = Directions(active = true, distance = "650 m", distanceM = 650, turn = "TURN_RIGHT", street = "Av. Paulista", remainingM = 4_800, remainingS = 720)
-        // Default: always shown.
+        // Default 1 km: shown at 650 m, hidden beyond 1 km.
+        assertEquals(1000, HudOverlayModel.Config().showTurnFromM)
         assertTrue(!HudOverlayModel.tbtFor(far)!!.turnHidden)
+        assertTrue(HudOverlayModel.tbtFor(far.copy(distance = "1.4 km", distanceM = 1_400))!!.turnHidden)
         val from500 = HudOverlayModel.Config(layout = HudOverlayModel.Layout.NAVIGATION, showTurnFromM = 500)
         val hidden = HudOverlayModel.tbtFor(far, from500)!!
         assertTrue(hidden.turnHidden)

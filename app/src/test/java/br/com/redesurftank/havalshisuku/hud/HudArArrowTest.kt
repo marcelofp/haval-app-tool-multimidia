@@ -427,10 +427,13 @@ class HudArArrowTest {
         // Straight, then bending right: the arrow leans right on top of the arc.
         val straight = floatArrayOf(0f, 0f, 0f, 200f)
         assertEquals(0f, HudOverlayModel.roadBendAhead(straight)!!, 0.5f)
+        // A 45 deg bend turns it the most (doubled, capped); a soft 15 deg one shows as 30.
         val bend = floatArrayOf(0f, 0f, 0f, 30f, 30f, 60f, 60f, 90f, 90f, 120f)
-        val deg = HudOverlayModel.roadBendAhead(bend)!!
-        assertEquals(45f, deg, 1f)
-        assertEquals(-45f, HudOverlayModel.roadBendAhead(floatArrayOf(0f, 0f, 0f, 30f, -30f, 60f, -60f, 90f, -90f, 120f))!!, 1f)
+        assertEquals(HudOverlayModel.CHEVRON_ROAD_MAX_DEG, HudOverlayModel.roadBendAhead(bend)!!, 1f)
+        assertEquals(-HudOverlayModel.CHEVRON_ROAD_MAX_DEG, HudOverlayModel.roadBendAhead(floatArrayOf(0f, 0f, 0f, 30f, -30f, 60f, -60f, 90f, -90f, 120f))!!, 1f)
+        val dx = (kotlin.math.tan(Math.toRadians(15.0)) * 30).toFloat()
+        val soft = floatArrayOf(0f, 0f, 0f, 30f, dx, 60f, 2 * dx, 90f, 3 * dx, 120f)
+        assertEquals(30f, HudOverlayModel.roadBendAhead(soft)!!, 1f)
         assertNull(HudOverlayModel.roadBendAhead(floatArrayOf(0f, 0f, 0f, 40f)))
         // Never more than the cap.
         assertEquals(HudOverlayModel.CHEVRON_ROAD_MAX_DEG, HudOverlayModel.roadBendAhead(floatArrayOf(0f, 0f, 0f, 30f, 100f, 31f, 200f, 32f))!!, 0.01f)

@@ -247,8 +247,11 @@ object AndroidAutoNavigationMonitor {
                     .fold(
                         onSuccess = { tail ->
                             lanes = tail.lanes
+                            // The cue text too (owner, 2026-10-25): AA never sends a 2nd step on this car
+                            // (189/189 steps=1), so a "then turn ..." hint could only ride in the cue.
                             "lanes=${tail.lanes.size} [${AndroidAutoNavigationTelemetry.describeLanes(tail.lanes)}] " +
-                                "cues=${tail.cues.size} steps=$listSize next=${tail.nextRoad}/${tail.nextEvent}"
+                                "cues=${tail.cues.size} steps=$listSize next=${tail.nextRoad}/${tail.nextEvent} " +
+                                "cue=${tail.cues.joinToString(" | ").take(160)}"
                         },
                         onFailure = { "parse_failed ${it.javaClass.simpleName}: ${it.message}" }
                     )

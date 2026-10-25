@@ -386,7 +386,8 @@ class HudOverlayRenderer {
         val lines = listOf(tbt.tripDistance, tbt.tripTime).filter { it.isNotEmpty() }
         if (lines.isEmpty()) return
         // The trip line's own size and baseline; the first line sits above it.
-        val (base, wanted) = if (tbt.style == M.TbtStyle.AR) M.AR_TRIP_BASELINE to M.AR_TRIP_SIZE else M.tripPlacement(tbt.style)
+        val (base, lineSize) = if (tbt.style == M.TbtStyle.AR) M.AR_TRIP_BASELINE to M.AR_TRIP_SIZE else M.tripPlacement(tbt.style)
+        val wanted = lineSize + M.TRIP_BLOCK_EXTRA_SIZE
         val baselines = if (lines.size == 2) listOf(base - wanted * M.TRIP_BLOCK_LINE_STEP, base) else listOf(base)
         fun rightAt(b: Float, size: Float) = if (arcs) M.columnRightAt(b, size, wideArcs) else M.BOX_RIGHT
         var size = wanted
