@@ -403,9 +403,10 @@ class HudArArrowTest {
         assertNull(HudOverlayModel.frameFor(ar.copy(chevronsAlways = true), far, 0, null, speedKmh = 0.0).chevrons)
         assertNull(HudOverlayModel.frameFor(ar.copy(chevronsAlways = true), far.copy(turn = "STRAIGHT"), 0, null).chevrons)
         assertNull(HudOverlayModel.frameFor(ar.copy(chevronsAlways = true, showTurnFromM = 500), far, 0, null).chevrons)
-        // Far away it points straight up, leaning to the diagonal from 300 m to 100 m.
+        // It follows the road until close: still straight at 200 m, leaning over from 130 m to 100 m.
         assertEquals(0f, always.lean, 0.001f)
-        assertEquals(0.5f, HudOverlayModel.frameFor(ar.copy(chevronsAlways = true), d, 0, null, arMetersOverride = 200f).chevrons!!.lean, 0.01f)
+        assertEquals(0f, HudOverlayModel.frameFor(ar.copy(chevronsAlways = true), d, 0, null, arMetersOverride = 200f).chevrons!!.lean, 0.001f)
+        assertEquals(0.5f, HudOverlayModel.frameFor(ar.copy(chevronsAlways = true), d, 0, null, arMetersOverride = 115f).chevrons!!.lean, 0.01f)
         assertEquals(1f, HudOverlayModel.frameFor(ar.copy(chevronsAlways = true), d, 0, null, arMetersOverride = 90f).chevrons!!.lean, 0.001f)
         // It travels round the arc: on top pointing up, then to the turn's side, ending where the strip starts.
         val top = HudOverlayModel.chevronCompass(1, true, 0f)
@@ -443,7 +444,7 @@ class HudArArrowTest {
         // Close to the turn the bend no longer matters: the turn's diagonal.
         val near = HudOverlayModel.chevronCompass(1, true, 1f, roadDeg = -40f)
         assertEquals(HudOverlayModel.chevronCompass(1, true, 1f).x, near.x, 0.01f)
-        assertEquals(-45f, near.dir, 0.01f)
+        assertEquals(-45f, near.dir, 1f) // the strip's first chord on its curve
     }
 
     @Test
@@ -463,6 +464,40 @@ class HudArArrowTest {
             "SLIGHT_RIGHT" to "SLIGHT_RIGHT", "KEEP_LEFT" to "SLIGHT_LEFT", "FORK_RIGHT" to "SLIGHT_RIGHT",
             "OFF_RAMP_LEFT" to "SLIGHT_LEFT", "TURN_RIGHT" to "TURN_RIGHT", "ROUNDABOUT" to "ROUNDABOUT", "MERGE" to "MERGE"
         )) assertEquals(t, icon, HudOverlayModel.hudIcon(t))
+    }
+
+    @Test
+    fun `soft turns animate at their own angle, read from the map when it has the turn`() {
+        // The soft strip points at the turn's angle (from straight ahead), inside the band.
+        for (deg in listOf(30f, 45f, 55f)) {
+            val end = HudOverlayModel.chevronStrip(1, false, 1f, deg)
+            assertTrue(end.all { kotlin.math.abs(it.dir - (-90f + deg)) < 0.5f })
+            assertTrue(end.all { it.y >= HudOverlayModel.CHEVRON_SOFT_TOP_Y - 0.5f })
+            assertEquals(4, end.size)
+            // The still/Sempre arrow ends exactly where and how the strip starts.
+            val start = HudOverlayModel.chevronStrip(1, false, 0f, deg)[0]
+            val compass = HudOverlayModel.chevronCompass(1, false, 1f, turnDeg = deg)
+            assertEquals(start.dir, compass.dir, 0.01f)
+            assertEquals(start.x, compass.x, 0.01f)
+        }
+        // The map's turn: a route bending 40 deg right at 80 m.
+        val rad = Math.toRadians(40.0)
+        val pts = ArrayList<Float>()
+        for (s in 0..80 step 10) { pts += 0f; pts += s.toFloat() }
+        for (s in 10..140 step 10) { pts += (s * kotlin.math.sin(rad)).toFloat(); pts += 80f + (s * kotlin.math.cos(rad)).toFloat() }
+        val route = pts.toFloatArray()
+        assertEquals(40f, HudOverlayModel.routeTurnAt(route, 80f)!!, 1f)
+        assertNull(HudOverlayModel.routeTurnAt(floatArrayOf(0f, 0f, 0f, 60f), 50f))
+        // AA says TURN_RIGHT (90), the map says 40: a soft strip at 40.
+        val tbt = HudOverlayModel.Tbt(icon = "TURN_RIGHT", distanceValue = "40", distanceUnit = "m", lanes = emptyList(),
+            style = HudOverlayModel.TbtStyle.AR, trip = "", route = route, routeMatched = true, routeClear = true,
+            guideMeters = 80f, guideAngle = 90f)
+        val ch = HudOverlayModel.chevronsFor(tbt, 30.0)!!
+        assertTrue(!ch.sharp)
+        assertEquals(40f, ch.turnDeg, 1f)
+        // The map on the other side, or not matched: AA's own angle.
+        assertTrue(HudOverlayModel.chevronsFor(tbt.copy(guideAngle = -90f), 30.0)!!.sharp)
+        assertTrue(HudOverlayModel.chevronsFor(tbt.copy(routeMatched = false), 30.0)!!.sharp)
     }
 
     @Test

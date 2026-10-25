@@ -516,10 +516,11 @@ object HudOverlayModel {
     /** Sharp turn: how far past the curve's corner the lead comes out level, then its run along the top edge. */
     const val CHEVRON_CURVE_EXIT = 10f
     const val CHEVRON_TOP_RUN = 75f
-    /** Soft turn: the length of its diagonal. */
+    /** Soft turn: the length of its diagonal, and the highest row its end may reach. */
     const val CHEVRON_SOFT_LEN = 61f
+    const val CHEVRON_SOFT_TOP_Y = 50f
     /** "Sempre": the still chevron points straight up from this far, leaning to the diagonal by [CHEVRON_SHOW_M]. */
-    const val CHEVRON_ALWAYS_UP_M = 300f
+    const val CHEVRON_ALWAYS_UP_M = 130f
     /** On a roundabout's ring: only this far round it (never while entering, owner 2026-10-23). */
     const val RB_CHEVRON_MIN_PROGRESS = 0.3f
 
@@ -532,14 +533,15 @@ object HudOverlayModel {
      * round the arc to the turn's side, leaning over, and at 1 it is exactly where the
      * near-turn chevrons start, so they take over without a jump.
      */
-    fun chevronCompass(side: Int, sharp: Boolean, lean: Float, roadDeg: Float = 0f): ChevronMark {
+    fun chevronCompass(side: Int, sharp: Boolean, lean: Float, roadDeg: Float = 0f, turnDeg: Float = 45f): ChevronMark {
         val l = lean.coerceIn(0f, 1f)
         val start = if (sharp) CHEVRON_SHARP_START_DEG else CHEVRON_SOFT_START_DEG
         val end = if (side > 0) start else 540f - start
         // Far away it follows the road's own bends ([roadDeg], + right) instead of straight up.
         val base = 270f + roadDeg
         val (x, y) = arcPoint(base + (end - base) * l, ARC_POWER_R_OUT + CHEVRON_ARC_GAP)
-        val dir0 = if (side > 0) -45f else -135f
+        // ...and ends exactly as the strip starts (its direction too, a soft turn's own angle).
+        val dir0 = chevronStrip(side, sharp, 0f, turnDeg)[0].dir
         val dirBase = -90f + roadDeg
         return ChevronMark(x, y, dirBase + (dir0 - dirBase) * l)
     }
@@ -557,36 +559,67 @@ object HudOverlayModel {
      * screen: a GPS heading off the street does not tilt it. Null when the route is too short.
      */
     fun roadBendAhead(route: FloatArray): Float? {
-        fun at(s: Float): Pair<Float, Float>? {
-            var left = s
-            for (i in 0 until route.size / 2 - 1) {
-                val dx = route[2 * i + 2] - route[2 * i]
-                val dy = route[2 * i + 3] - route[2 * i + 1]
-                val len = kotlin.math.hypot(dx, dy)
-                if (left <= len && len > 0f) return route[2 * i] + dx * left / len to route[2 * i + 1] + dy * left / len
-                left -= len
-            }
-            return null
-        }
-        fun heading(a: Pair<Float, Float>, b: Pair<Float, Float>) =
-            Math.toDegrees(kotlin.math.atan2((b.first - a.first).toDouble(), (b.second - a.second).toDouble())).toFloat()
-        val start = heading(at(0f) ?: return null, at(15f) ?: return null)
-        val ahead = heading(at(CHEVRON_ROAD_AHEAD_M - 15f) ?: return null, at(CHEVRON_ROAD_AHEAD_M + 15f) ?: return null)
-        val bend = ((ahead - start) % 360f + 540f) % 360f - 180f
-        return (bend * CHEVRON_ROAD_GAIN).coerceIn(-CHEVRON_ROAD_MAX_DEG, CHEVRON_ROAD_MAX_DEG)
+        val start = routeHeading(route, 0f, 15f) ?: return null
+        val ahead = routeHeading(route, CHEVRON_ROAD_AHEAD_M - 15f, CHEVRON_ROAD_AHEAD_M + 15f) ?: return null
+        return (angleDiff(ahead, start) * CHEVRON_ROAD_GAIN).coerceIn(-CHEVRON_ROAD_MAX_DEG, CHEVRON_ROAD_MAX_DEG)
     }
+
+    /** How far either side of the maneuver the route's heading is read for its turn angle. */
+    const val CHEVRON_TURN_NEAR_M = 30f
+    const val CHEVRON_TURN_FAR_M = 50f
+
+    /**
+     * The turn the drawn [route] (car frame metres) really makes around [atM] metres along it
+     * (+ right, degrees): its heading 30..50 m after against 30..50 m before, so a junction
+     * matched a little off AA's distance still falls between. Null when the route is too short.
+     * The chevrons use it instead of the maneuver type (owner, 2026-10-25: a "turn" that is a
+     * soft bend on the map should animate as one).
+     */
+    fun routeTurnAt(route: FloatArray, atM: Float): Float? {
+        val b0 = (atM - CHEVRON_TURN_FAR_M).coerceAtLeast(0f)
+        val b1 = (atM - CHEVRON_TURN_NEAR_M).coerceAtLeast(b0 + 5f)
+        val before = routeHeading(route, b0, b1) ?: return null
+        val after = routeHeading(route, atM + CHEVRON_TURN_NEAR_M, atM + CHEVRON_TURN_FAR_M) ?: return null
+        return angleDiff(after, before)
+    }
+
+    /** Point [s] metres along [route] (x, y pairs), or null past its end. */
+    private fun pointAlong(route: FloatArray, s: Float): Pair<Float, Float>? {
+        var left = s
+        for (i in 0 until route.size / 2 - 1) {
+            val dx = route[2 * i + 2] - route[2 * i]
+            val dy = route[2 * i + 3] - route[2 * i + 1]
+            val len = kotlin.math.hypot(dx, dy)
+            if (left <= len && len > 0f) return route[2 * i] + dx * left / len to route[2 * i + 1] + dy * left / len
+            left -= len
+        }
+        return null
+    }
+
+    /** The route's heading (degrees, + right of ahead) from [a] to [b] metres along it. */
+    private fun routeHeading(route: FloatArray, a: Float, b: Float): Float? {
+        val p = pointAlong(route, a) ?: return null
+        val q = pointAlong(route, b) ?: return null
+        return Math.toDegrees(kotlin.math.atan2((q.first - p.first).toDouble(), (q.second - p.second).toDouble())).toFloat()
+    }
+
+    private fun angleDiff(to: Float, from: Float): Float = ((to - from) % 360f + 540f) % 360f - 180f
 
     /**
      * The lead chevron's way, as x,y points: a sharp turn curves from the diagonal start up to
      * the top row (tangent -45 deg there, level at the end), then runs along the top edge; a
      * soft turn is the straight diagonal.
      */
-    private fun chevronWay(side: Int, sharp: Boolean): FloatArray {
+    private fun chevronWay(side: Int, sharp: Boolean, turnDeg: Float = 45f): FloatArray {
         val deg = if (sharp) CHEVRON_SHARP_START_DEG else CHEVRON_SOFT_START_DEG
         val (x0, y0) = arcPoint(if (side > 0) deg else 540f - deg, ARC_POWER_R_OUT + CHEVRON_ARC_GAP)
         if (!sharp) {
-            val d = CHEVRON_SOFT_LEN * 0.70710677f
-            return floatArrayOf(x0, y0, x0 + side * d, y0 - d)
+            // At the turn's own angle (owner, 2026-10-25), shortened to stay in the band.
+            val th = Math.toRadians(turnDeg.coerceIn(CHEVRON_MIN_DEG, CHEVRON_SHARP_DEG).toDouble())
+            val ux = kotlin.math.sin(th).toFloat()
+            val uy = kotlin.math.cos(th).toFloat()
+            val len = minOf(CHEVRON_SOFT_LEN, (y0 - CHEVRON_SOFT_TOP_Y) / uy)
+            return floatArrayOf(x0, y0, x0 + side * ux * len, y0 - uy * len)
         }
         // Quadratic curve P0 -> P1 with its corner where the start's diagonal meets the top row.
         val rise = y0 - CHEVRON_END_Y
@@ -640,12 +673,12 @@ object HudOverlayModel {
      * one, so it is not lined up while still on the curve; by [CHEVRON_ALIGNED_M] all four lie
      * in the row.
      */
-    fun chevronStrip(side: Int, sharp: Boolean, intensity: Float): List<ChevronMark> {
+    fun chevronStrip(side: Int, sharp: Boolean, intensity: Float, turnDeg: Float = 45f): List<ChevronMark> {
         val meters = CHEVRON_ANIM_M * (1f - intensity.coerceIn(0f, 1f))
-        val way = chevronWay(side, sharp)
+        val way = chevronWay(side, sharp, turnDeg)
         val total = wayLength(way)
         // Where the lone travel ends: the curve's end (sharp), or most of the diagonal (soft).
-        val alone = if (sharp) wayLength(way, way.size / 2 - 2) else total - 3 * CHEVRON_SPACING
+        val alone = if (sharp) wayLength(way, way.size / 2 - 2) else (total - 3 * CHEVRON_SPACING).coerceAtLeast(0f)
         val lead = if (meters >= CHEVRON_TRAIL_M) {
             val u = (CHEVRON_ANIM_M - meters) / (CHEVRON_ANIM_M - CHEVRON_TRAIL_M)
             alone * u * u * (3 - 2 * u)
@@ -719,7 +752,13 @@ object HudOverlayModel {
         val heading = if (tbt.dynamicRoundabout) {
             if (tbt.roundaboutClockwise) -90f else 90f
         } else {
-            tbt.guideAngle ?: return null
+            val meta = tbt.guideAngle ?: return null
+            // The map's own angle when the route is on the real streets and agrees on the side:
+            // a "turn" that is a soft bend there animates as one (owner, 2026-10-25).
+            val map = tbt.route?.takeIf { tbt.routeMatched && meters <= CHEVRON_SHOW_M * 1.5f }
+                ?.let { routeTurnAt(it, meters) }
+                ?.takeIf { kotlin.math.abs(it) >= CHEVRON_MIN_DEG && (it > 0f) == (meta > 0f) }
+            map ?: meta
         }
         if (kotlin.math.abs(heading) < CHEVRON_MIN_DEG) return null
         val side = if (heading > 0f) 1 else -1
@@ -729,7 +768,7 @@ object HudOverlayModel {
         // "Sempre" far away: straight up (the turn is still ahead), leaning to the diagonal as it nears.
         val l = ((CHEVRON_ALWAYS_UP_M - meters) / (CHEVRON_ALWAYS_UP_M - CHEVRON_SHOW_M)).coerceIn(0f, 1f)
         val road = if (always) tbt.route?.takeIf { tbt.routeMatched }?.let { roadBendAhead(it) } ?: 0f else 0f
-        return Chevrons(side, intensity, animate, sharp, lean = l * l * (3 - 2 * l), roadDeg = road)
+        return Chevrons(side, intensity, animate, sharp, lean = l * l * (3 - 2 * l), roadDeg = road, turnDeg = kotlin.math.abs(heading))
     }
 
     /**
@@ -977,7 +1016,9 @@ object HudOverlayModel {
         /** The still chevron's pointing: 0 straight up .. 1 the diagonal ("Sempre" far away). */
         val lean: Float = 1f,
         /** "Sempre" far away: the road's bend ahead (+ right), so the arrow follows the curves. */
-        val roadDeg: Float = 0f
+        val roadDeg: Float = 0f,
+        /** The turn's size (degrees, from the map when it has it): a soft one's strip takes this angle. */
+        val turnDeg: Float = 45f
     )
 
     /** Radar alert for the HUD (see RadarManager): metres to the camera, its limit, over it. */

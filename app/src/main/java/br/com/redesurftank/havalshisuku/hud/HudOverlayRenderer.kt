@@ -177,8 +177,8 @@ class HudOverlayRenderer {
 
     /** The chevrons to draw for [ch]: the animated strip, or the still direction arrow. */
     private fun chevronMarks(ch: M.Chevrons): List<M.ChevronMark> =
-        if (ch.animate) M.chevronStrip(ch.side, ch.sharp, ch.intensity)
-        else listOf(M.chevronCompass(ch.side, ch.sharp, ch.lean, ch.roadDeg))
+        if (ch.animate) M.chevronStrip(ch.side, ch.sharp, ch.intensity, ch.turnDeg)
+        else listOf(M.chevronCompass(ch.side, ch.sharp, ch.lean, ch.roadDeg, ch.turnDeg))
 
     // ---- AR chevrons above the speed ----
 
