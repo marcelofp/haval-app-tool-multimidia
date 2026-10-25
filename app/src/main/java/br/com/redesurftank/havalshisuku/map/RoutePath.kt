@@ -41,8 +41,10 @@ object RoutePath {
     const val JUNCTION_M = 40f
     /** An exit is accepted when within this of the maneuver's turn angle. */
     const val EXIT_TOLERANCE_DEG = 55f
-    /** Past the maneuver, the street is followed this far. */
+    /** Past the maneuver, the street is followed this far, or to its next real junction... */
     const val TAIL_M = 120f
+    /** ...but at least this far, so a junction right at the maneuver doesn't cut it to nothing. */
+    const val TAIL_MIN_M = 5f
     /** Nothing further than this ahead. */
     const val AHEAD_M = 600f
     /** Keep following the road while its bends stay under this (a sharper one is a junction we don't take). */
@@ -224,6 +226,11 @@ object RoutePath {
                     tail += hypot(cur.x - prev.x, cur.y - prev.y)
                     out += cur.x; out += cur.y
                     if (tail >= TAIL_M) break
+                    // AA sends one maneuver only (steps=1 on this car): past the next real
+                    // junction we can't know the way, so the tail stops there instead of drawing
+                    // straight on (owner, 2026-10-25: a right then a left 11 m later read as
+                    // straight on).
+                    if (tail >= TAIL_MIN_M && isJunction(prev, cur)) break
                     val n = straightOn(prev, cur) ?: break
                     prev = cur
                     cur = n
@@ -244,6 +251,10 @@ object RoutePath {
         }
         return Route(head + arc(head[2 * n - 2], head[2 * n - 1], dirDeg, turnTo), matched = true, nextOnSide = false)
     }
+
+    /** [cur] (reached from [prev]) is a real junction: two or more onward ways that aren't driveways. */
+    private fun isJunction(prev: Node, cur: Node): Boolean =
+        cur.next.indices.count { k -> cur.next[k] !== prev && !cur.minor[k] } >= 2
 
     /** A street (not a driveway) leaving [cur] on the same side as [turnTo], other than the way on. */
     private fun sideStreet(prev: Node, cur: Node, on: Node, turnTo: Float): Boolean {

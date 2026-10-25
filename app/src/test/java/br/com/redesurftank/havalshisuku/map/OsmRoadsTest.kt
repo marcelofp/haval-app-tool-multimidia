@@ -148,6 +148,27 @@ class OsmRoadsTest {
     }
 
     @Test
+    fun `route - after the turn, the tail stops at the next junction (the way on is unknown)`() {
+        fun road(vararg xy: Float, w: Float = 1f) = LocalRoad(xy, w)
+        // Right at 100 m onto a street with a cross street 11 m in (Lorde Byron, 2026-10-25).
+        val roads = listOf(
+            road(0f, -30f, 0f, 100f, 0f, 300f),
+            road(0f, 100f, 11f, 100f, 120f, 100f),
+            road(11f, 40f, 11f, 100f, 11f, 160f)
+        )
+        val r = RoutePath.route(roads, 100f, 90f)!!
+        val n = r.pts.size / 2
+        assertEquals(11f, r.pts[2 * n - 2], 0.5f)
+        assertEquals(100f, r.pts[2 * n - 1], 0.5f)
+        // No junction after it: the street is followed on as before.
+        val open = RoutePath.route(roads.take(2), 100f, 90f)!!
+        assertTrue(open.pts[open.pts.size - 2] > 100f)
+        // A driveway isn't a junction.
+        val drive = RoutePath.route(listOf(roads[0], roads[1], road(11f, 100f, 11f, 140f, w = 0.55f)), 100f, 90f)!!
+        assertTrue(drive.pts[drive.pts.size - 2] > 100f)
+    }
+
+    @Test
     fun `route - the road under the car to AA's distance, then the matching street`() {
         val r = RoutePath.route(grid(), 200f, 90f)!!
         assertTrue(r.matched)
