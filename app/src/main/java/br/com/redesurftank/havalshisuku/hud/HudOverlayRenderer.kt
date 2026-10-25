@@ -134,14 +134,61 @@ class HudOverlayRenderer {
      */
     fun draw(canvas: Canvas, frame: M.Frame?, nowMs: Long = android.os.SystemClock.uptimeMillis()) {
         canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
-        drawContent(canvas, frame, nowMs)
-        frame?.chevrons?.let { drawChevrons(canvas, it, nowMs) }
+        drawWithChevrons(canvas, frame, nowMs, nowMs)
     }
+
+    /**
+     * The content, then the chevrons on top. Translucent over white text they read as behind it
+     * (owner, 2026-10-25), so the content goes into a layer first and each chevron cuts a thin
+     * margin out of it before it is drawn.
+     */
+    private fun drawWithChevrons(canvas: Canvas, frame: M.Frame?, nowMs: Long, chevronMs: Long) {
+        val ch = frame?.chevrons
+        if (ch == null) {
+            drawContent(canvas, frame, nowMs)
+            return
+        }
+        val layer = canvas.saveLayer(0f, 0f, 480f, 240f, null)
+        drawContent(canvas, frame, nowMs)
+        for (mark in chevronMarks(ch)) placeChevron(canvas, mark, chevronCut)
+        canvas.restoreToCount(layer)
+        drawChevrons(canvas, ch, chevronMs)
+    }
+
+    /** Clears a chevron's shape, a little larger, from what is under it (see drawWithChevrons). */
+    private val chevronCut = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL_AND_STROKE
+        strokeWidth = M.CHEVRON_CUT_MARGIN * 2
+        strokeJoin = Paint.Join.ROUND
+        xfermode = android.graphics.PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
+    }
+
+    private fun placeChevron(canvas: Canvas, mark: M.ChevronMark, paint: Paint) {
+        canvas.save()
+        canvas.translate(mark.x, mark.y)
+        canvas.rotate(mark.dir)
+        canvas.drawPath(chevronPath, paint)
+        canvas.restore()
+    }
+
+    /** The chevrons to draw for [ch]: the animated strip, or the still direction arrow. */
+    private fun chevronMarks(ch: M.Chevrons): List<M.ChevronMark> =
+        if (ch.animate) M.chevronStrip(ch.side, ch.sharp, ch.intensity)
+        else listOf(M.chevronCompass(ch.side, ch.sharp, ch.lean, ch.roadDeg))
 
     // ---- AR chevrons above the speed ----
 
     private val chevronPaint = fillPaint(Color.rgb(90, 180, 255))
-    private val chevronPath = Path()
+    /** A right-pointing chevron round the origin, turned to each one's direction. */
+    private val chevronPath = Path().apply {
+        moveTo(-M.CHEVRON_W, -M.CHEVRON_HALF_H)
+        lineTo(-(M.CHEVRON_W - M.CHEVRON_STROKE), -M.CHEVRON_HALF_H)
+        lineTo(M.CHEVRON_STROKE, 0f)
+        lineTo(-(M.CHEVRON_W - M.CHEVRON_STROKE), M.CHEVRON_HALF_H)
+        lineTo(-M.CHEVRON_W, M.CHEVRON_HALF_H)
+        lineTo(0f, 0f)
+        close()
+    }
 
     /**
      * A row of chevrons pointing to the turn side, sliding that way as the car closes in; a pulse
@@ -154,27 +201,14 @@ class HudOverlayRenderer {
         val appear = 1f
         val base = if (ch.animate) 0.45f + 0.4f * t else 0.9f
         // Still: the direction arrow round the arc ("Sempre" far away; on the diagonal from 100 m).
-        val marks = if (ch.animate) M.chevronStrip(ch.side, ch.sharp, t) else listOf(M.chevronCompass(ch.side, ch.sharp, ch.lean, ch.roadDeg))
-        // A right-pointing chevron round the origin, turned to each one's direction.
-        chevronPath.reset()
-        chevronPath.moveTo(-M.CHEVRON_W, -M.CHEVRON_HALF_H)
-        chevronPath.lineTo(-(M.CHEVRON_W - M.CHEVRON_STROKE), -M.CHEVRON_HALF_H)
-        chevronPath.lineTo(M.CHEVRON_STROKE, 0f)
-        chevronPath.lineTo(-(M.CHEVRON_W - M.CHEVRON_STROKE), M.CHEVRON_HALF_H)
-        chevronPath.lineTo(-M.CHEVRON_W, M.CHEVRON_HALF_H)
-        chevronPath.lineTo(0f, 0f)
-        chevronPath.close()
+        val marks = chevronMarks(ch)
         for ((k, mark) in marks.withIndex()) {
             // k = 0 trails, the last is the lead (pulse runs towards it, as before).
             var d = phase - k.toFloat() / M.CHEVRON_COUNT
             d -= kotlin.math.floor(d)
             val pulse = (1f - d) * (1f - d) * (1f - d)
             chevronPaint.alpha = (255 * appear * mark.appear * (base + (1f - base) * pulse)).toInt().coerceIn(0, 255)
-            canvas.save()
-            canvas.translate(mark.x, mark.y)
-            canvas.rotate(mark.dir)
-            canvas.drawPath(chevronPath, chevronPaint)
-            canvas.restore()
+            placeChevron(canvas, mark, chevronPaint)
         }
     }
 
@@ -347,11 +381,12 @@ class HudOverlayRenderer {
     private fun drawTripBlock(canvas: Canvas, tbt: M.Tbt, arcs: Boolean, wideArcs: Boolean) {
         val lines = listOf(tbt.tripDistance, tbt.tripTime).filter { it.isNotEmpty() }
         if (lines.isEmpty()) return
-        val baselines = if (lines.size == 2) listOf(M.TRIP_BLOCK_LINE1, M.TRIP_BLOCK_LINE2)
-        else listOf((M.TRIP_BLOCK_LINE1 + M.TRIP_BLOCK_LINE2) / 2)
+        // The trip line's own size and baseline; the first line sits above it.
+        val (base, wanted) = if (tbt.style == M.TbtStyle.AR) M.AR_TRIP_BASELINE to M.AR_TRIP_SIZE else M.tripPlacement(tbt.style)
+        val baselines = if (lines.size == 2) listOf(base - wanted * M.TRIP_BLOCK_LINE_STEP, base) else listOf(base)
         fun rightAt(b: Float, size: Float) = if (arcs) M.columnRightAt(b, size, wideArcs) else M.BOX_RIGHT
-        var size = M.TRIP_BLOCK_SIZE
-        var flag = M.TRIP_BLOCK_FLAG
+        var size = wanted
+        var flag = wanted * M.TRIP_BLOCK_FLAG_SCALE
         fun width() = flag + M.TRIP_BLOCK_GAP + lines.maxOf { richWidth(it, size) }
         val right = baselines.minOf { rightAt(it, size) }
         val room = right - M.TRIP_MIN_LEFT
@@ -850,6 +885,21 @@ class HudOverlayRenderer {
             )
             return top + (M.RB_ENTRY_BOTTOM + M.RB_STROKE / 2) / 24f * size
         }
+        if (icon == "SLIGHT_RIGHT" || icon == "SLIGHT_LEFT") {
+            // The straight arrow turned 45 deg to the side (see M.hudIcon).
+            val straight = HudTbtIcons.turnPath("STRAIGHT", size)
+            if (straight != null) {
+                slightMatrix.setRotate(if (icon == "SLIGHT_RIGHT") 45f else -45f, size / 2, size / 2)
+                slightPath.set(straight)
+                slightPath.transform(slightMatrix)
+                canvas.save()
+                canvas.translate(left, top)
+                canvas.drawPath(slightPath, fill)
+                canvas.restore()
+                slightPath.computeBounds(arrowBounds, true)
+                return top + arrowBounds.bottom
+            }
+        }
         val path = HudTbtIcons.turnPath(icon, size)
         if (path != null) {
             canvas.save()
@@ -870,6 +920,9 @@ class HudOverlayRenderer {
      * Ring with the entry at the bottom and an arrow at the exit [angle] degrees around it; the
      * exits passed before it are short dim stubs (positions approximate, see passedExitAngles).
      */
+    private val slightMatrix = android.graphics.Matrix()
+    private val slightPath = Path()
+
     private fun drawRoundabout(
         canvas: Canvas,
         left: Float,
@@ -1046,9 +1099,8 @@ class HudOverlayRenderer {
                 wideArcs = M.wideArcs(scenario.speedKmh.toDouble(), wasWide = false),
                 speedKmh = scenario.speedKmh.toDouble()
             )
-            drawContent(canvas, frame)
             // A still of the approach chevrons (the sharp-left preview), mid-pulse.
-            frame.chevrons?.let { drawChevrons(canvas, it, PREVIEW_PULSE_MS) }
+            drawWithChevrons(canvas, frame, 0L, PREVIEW_PULSE_MS)
         }
         return bitmap
     }

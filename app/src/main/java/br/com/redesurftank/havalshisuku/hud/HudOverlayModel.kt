@@ -231,12 +231,13 @@ object HudOverlayModel {
     const val TRIP_MIN_LEFT = 2f
 
     // Turn hidden (further than "Mostrar próxima manobra"): the trip on two lines, distance over
-    // time, with the flag on the left centred on both (owner, 2026-10-24).
-    const val TRIP_BLOCK_LINE1 = 106f
-    const val TRIP_BLOCK_LINE2 = 138f
-    const val TRIP_BLOCK_SIZE = 26f
-    const val TRIP_BLOCK_FLAG = 30f
-    const val TRIP_BLOCK_GAP = 8f
+    // time, with the flag on the left centred on both (owner, 2026-10-24). At the trip line's own
+    // size and place, the time on its baseline (owner, 2026-10-25: it came out big and moved).
+    /** Second line to first: this many text sizes up. */
+    const val TRIP_BLOCK_LINE_STEP = 1.25f
+    /** The flag, against the text size (it spans both lines). */
+    const val TRIP_BLOCK_FLAG_SCALE = 1.4f
+    const val TRIP_BLOCK_GAP = 6f
 
     /** pt-BR grouping, as groupThousands in tbtTurnIcons.js: 1234 -> "1.234". */
     private fun groupThousands(n: Int): String =
@@ -274,6 +275,22 @@ object HudOverlayModel {
         if (token.endsWith("_LEFT")) return "TURN_LEFT"
         if (token.endsWith("_RIGHT")) return "TURN_RIGHT"
         return token
+    }
+
+    /**
+     * The HUD's icon for a maneuver: [resolveTurnIcon], except the gentle ones (slight, keep,
+     * fork, exit ramp) get a 45 deg arrow to their side ("SLIGHT_LEFT"/"SLIGHT_RIGHT") instead of
+     * the fork glyph or the 90 deg turn: a 45 deg exit read as a junction (owner, 2026-10-25).
+     */
+    fun hudIcon(turn: String?): String {
+        val token = turn.orEmpty().uppercase()
+        val side = when {
+            token.endsWith("_RIGHT") -> "RIGHT"
+            token.endsWith("_LEFT") -> "LEFT"
+            else -> null
+        }
+        val gentle = token.startsWith("SLIGHT") || token.startsWith("KEEP") || token.startsWith("FORK") || token.startsWith("OFF_RAMP")
+        return if (side != null && gentle) "SLIGHT_$side" else resolveTurnIcon(turn)
     }
 
     /** Tokens with artwork in tbtTurnIcons.js (SVG or text glyph). */
@@ -661,6 +678,8 @@ object HudOverlayModel {
         return right
     }
     const val CHEVRON_HALF_H = 7f
+    /** Margin each chevron clears in the text under it, so it reads as on top. */
+    const val CHEVRON_CUT_MARGIN = 1.5f
     const val CHEVRON_W = 7f
     const val CHEVRON_STROKE = 4f
     const val CHEVRON_COUNT = 4
@@ -1047,16 +1066,18 @@ object HudOverlayModel {
         val (value, unit) = splitDistance(d.distance, d.distanceM)
         val lanes = d.lanes.map { laneArrows(it) }
         val meters = distanceMeters(d.distance, d.distanceM)
-        val icon = resolveTurnIcon(d.turn)
+        val icon = hudIcon(d.turn)
         val hidden = turnHidden(config, meters)
         val exitAngle = if (icon == "ROUNDABOUT") drawableExitAngle(d.turnAngle) else null
         // AR: turns by their bend angle; a roundabout with a known exit gets the 3D ring (angle 0
-        // here, the renderer draws it from exitAngle).
-        val arAngle = if (config.layout != Layout.AR) null
-        else HudArArrow.angleFor(d.turn) ?: if (exitAngle != null) 0f else null
+        // here, the renderer draws it from exitAngle). A maneuver with no shape (a merge with no
+        // side, a ferry, a roundabout without its exit) or no distance yet (AA sends the new step
+        // before its distance) stays in AR, straight on: dropping to the plain row took the 3D
+        // map away at junctions (owner, 2026-10-25).
+        val arAngle = if (config.layout != Layout.AR) null else HudArArrow.angleFor(d.turn) ?: 0f
         val style = when {
             // AR keeps the centre arrow with lanes too; the lanes go to the left column.
-            arAngle != null && meters != null -> TbtStyle.AR
+            arAngle != null -> TbtStyle.AR
             lanes.isNotEmpty() -> TbtStyle.COMPACT
             config.smallArrowWhenFar && meters != null && meters >= FAR_THRESHOLD_M -> TbtStyle.FAR
             else -> TbtStyle.HERO
