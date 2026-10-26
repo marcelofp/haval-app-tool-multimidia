@@ -70,7 +70,7 @@ class HudSettingsRenderTest {
         compose.onNodeWithText("Rua").performClick()
         compose.onNodeWithContentDescription("Amarelo").performClick()
         shoot("7_settings_colors_3_street_yellow")
-        compose.onNodeWithText("Aviso de curva").performClick()
+        compose.onNodeWithText("Seta de direção").performClick()
         compose.onNodeWithContentDescription("Rosa").performClick()
         shoot("7_settings_colors_4_chevron_pink")
         compose.onNodeWithText("Azul").performClick()

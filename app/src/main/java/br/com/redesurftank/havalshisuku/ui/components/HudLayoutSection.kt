@@ -269,7 +269,7 @@ private enum class HudColorItem(
         { it.street }, { c, v -> c.copy(street = v) }, HudOverlayModel.COLOR_STREET, PreviewFocus.ARROW),
     ROUTE("Seta", { c, l -> l == HudOverlayModel.Layout.AR && c.navigation },
         { it.route }, { c, v -> c.copy(route = v) }, HudOverlayModel.COLOR_ROUTE, PreviewFocus.ARROW),
-    CHEVRON("Aviso de curva", { c, _ -> c.navigation && c.chevrons },
+    CHEVRON("Seta de direção", { c, _ -> c.navigation && c.chevrons },
         { it.chevron }, { c, v -> c.copy(chevron = v) }, HudOverlayModel.COLOR_CHEVRON, PreviewFocus.CHEVRONS)
 }
 
@@ -359,16 +359,22 @@ internal fun HudNavigationSettingsDialog(
                                     info = "Mais longe que isso, a seta, a distância, a rua e as faixas da próxima manobra ficam ocultas; a distância e o tempo até o destino aparecem em duas linhas. O mapa e a seta da Navegação AR continuam na tela."
                                 ) { change(config.copy(showTurnFromM = HudOverlayModel.SHOW_TURN_FROM_OPTIONS[it]), PreviewFocus.FAR) }
                                 // Both chevron settings on one row: the switch, and when (owner: two settings).
+                                // Seta de direção (owner, 2026-10-26): near the turns / also a still arrow
+                                // while the next maneuver shows / that arrow even while it is hidden.
                                 SwitchChoiceRow(
-                                    "Aviso de curva",
-                                    "Setas para o lado da curva.",
+                                    "Seta de direção",
+                                    "Para o lado da próxima curva.",
                                     config.chevrons,
-                                    listOf("Perto da curva", "Sempre"),
-                                    if (config.chevronsAlways) 1 else 0,
+                                    listOf("Perto das curvas", "Com próxima manobra", "Sempre"),
+                                    when {
+                                        !config.chevronsAlways -> 0
+                                        !config.chevronsEvenHidden -> 1
+                                        else -> 2
+                                    },
                                     enabled = config.navigation,
-                                    info = "Perto da curva: de 100 m uma seta azul na diagonal do lado da curva; de 50 m ela sobe e mais setas surgem atrás, em fila na borda de cima a partir de 10 m (em curva suave seguem pela diagonal). Na rotatória, só perto da saída. Sempre: além disso, uma seta parada que gira junto aos arcos seguindo a rua e se inclina para a curva ao chegar perto. Somem com o carro parado.",
+                                    info = "Perto das curvas: de 100 m uma seta na diagonal do lado da curva; de 50 m ela sobe e mais setas surgem atrás, em fila na borda de cima a partir de 10 m (em curva suave seguem pela diagonal). Na rotatória, só perto da saída. Com próxima manobra: além disso, uma seta parada junto aos arcos enquanto a próxima manobra aparece no HUD, seguindo a rua e se inclinando para a curva ao chegar perto. Sempre: essa seta parada aparece mesmo com a próxima manobra oculta (mais longe que \"Mostrar próxima manobra\"). Somem com o carro parado.",
                                     onCheckedChange = { change(config.copy(chevrons = it), PreviewFocus.CHEVRONS) },
-                                    onSelect = { change(config.copy(chevronsAlways = it == 1), PreviewFocus.CHEVRONS) }
+                                    onSelect = { change(config.copy(chevronsAlways = it >= 1, chevronsEvenHidden = it == 2), PreviewFocus.CHEVRONS) }
                                 )
                             }
                             HudSettingsTab.ARROW -> {
@@ -424,7 +430,7 @@ internal fun HudNavigationSettingsDialog(
                                     "Escolhidas ou tudo em azul.",
                                     listOf("Colorido", "Azul"),
                                     HudOverlayModel.ColorMode.entries.indexOf(config.colors.mode),
-                                    info = "Colorido: escolha a cor de cada parte abaixo (o padrão são as cores de sempre). Azul: tudo em tons de azul, inclusive o texto."
+                                    info = "Colorido: escolha a cor de cada parte abaixo (o padrão são as cores de sempre; só aparecem as partes ligadas nas outras abas). Azul: tudo no mesmo azul, inclusive o texto."
                                 ) { change(config.copy(colors = config.colors.copy(mode = HudOverlayModel.ColorMode.entries[it]))) }
                                 // Only the parts that are on (owner): a part switched off elsewhere isn't offered.
                                 val items = HudColorItem.entries.filter { it.shown(config, layout) }
@@ -707,13 +713,7 @@ private fun ColorItemsRow(
     onSelect: (HudColorItem) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        OptionText(
-            "Parte",
-            "Só as que estão ligadas nas outras abas.",
-            enabled,
-            "EV e Regen: arco de potência acelerando e regenerando. RPM: arco de rotação. Rua: ruas do mapa 3D. Seta: a seta e a rota no mapa 3D. Aviso de curva: as setas que aparecem perto da curva. Texto: textos, ícones das manobras e faixas."
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             for (item in items) {
                 val on = item == selected
                 Row(

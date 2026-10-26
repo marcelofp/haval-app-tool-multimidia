@@ -422,6 +422,7 @@ enum class SharedPreferencesKeys(val key: String, val description: String) {
     HUD_AR_GAUGES("hudArGauges", "HUD Navegação AR: indicadores de potência/RPM (none, bars, arcs)"),
     HUD_AR_CHEVRONS("hudArChevrons", "HUD Navegação AR: setas animadas acima da velocidade perto da curva"),
     HUD_AR_CHEVRONS_ALWAYS("hudArChevronsAlways", "HUD: uma seta parada junto aos arcos a qualquer distância, para o lado da próxima rua"),
+    HUD_CHEVRONS_EVEN_HIDDEN("hudChevronsEvenHidden", "HUD: a seta de direção parada aparece mesmo com a próxima manobra oculta"),
     HUD_AR_PLACEMENT("hudArPlacement", "HUD Navegação AR: seta no centro (center) ou entre as linhas de faixa (right)"),
     HUD_AR_MAP("hudArMap", "HUD Navegação AR: ruas do OpenStreetMap em cinza (beta)"),
     HUD_FONT("hudFont", "HUD: fonte do texto (light, regular, condensed)"),
@@ -435,7 +436,7 @@ enum class SharedPreferencesKeys(val key: String, val description: String) {
     HUD_COLOR_STREET("hudColorStreet", "HUD: cor das ruas do mapa"),
     HUD_COLOR_ROUTE("hudColorRoute", "HUD: cor da rota/seta do mapa"),
     HUD_COLOR_TEXT("hudColorText", "HUD: cor padrão do texto e ícones"),
-    HUD_COLOR_CHEVRON("hudColorChevron", "HUD: cor do aviso de curva (setas de aproximação)"),
+    HUD_COLOR_CHEVRON("hudColorChevron", "HUD: cor da seta de direção (setas perto das curvas)"),
     // Alerta de radar (Recursos). Read through RadarSettings.
     // The theme's turn-by-turn card (owner, 2026-10-25). Off: the theme gets "no navigation";
     // the radar and the HUD still read the real directions.

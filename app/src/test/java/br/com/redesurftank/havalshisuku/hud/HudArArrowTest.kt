@@ -401,6 +401,11 @@ class HudArArrowTest {
         assertNull(HudOverlayModel.frameFor(ar.copy(chevronsAlways = true), far, 0, null, speedKmh = 0.0).chevrons)
         assertNull(HudOverlayModel.frameFor(ar.copy(chevronsAlways = true), far.copy(turn = "STRAIGHT"), 0, null).chevrons)
         assertNull(HudOverlayModel.frameFor(ar.copy(chevronsAlways = true, showTurnFromM = 500), far, 0, null).chevrons)
+        // "Sempre" (owner, 2026-10-26): shown even while the turn is hidden; needs chevronsAlways too.
+        val hidden = HudOverlayModel.frameFor(ar.copy(chevronsAlways = true, chevronsEvenHidden = true, showTurnFromM = 500), far, 0, null).chevrons!!
+        assertEquals(1, hidden.side)
+        assertTrue(!hidden.animate)
+        assertNull(HudOverlayModel.frameFor(ar.copy(chevronsEvenHidden = true, showTurnFromM = 500), far, 0, null).chevrons)
         // It follows the road until close: still straight at 200 m, leaning over from 130 m to 100 m.
         assertEquals(0f, always.lean, 0.001f)
         assertEquals(0f, HudOverlayModel.frameFor(ar.copy(chevronsAlways = true), d, 0, null, arMetersOverride = 200f).chevrons!!.lean, 0.001f)

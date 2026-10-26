@@ -28,6 +28,7 @@ object HudOverlaySettings {
             arGauges = gauges(prefs, SharedPreferencesKeys.HUD_AR_GAUGES, SharedPreferencesKeys.HUD_AR_ARCS, defaults.arGauges),
             chevrons = prefs.getBoolean(SharedPreferencesKeys.HUD_AR_CHEVRONS.key, defaults.chevrons),
             chevronsAlways = prefs.getBoolean(SharedPreferencesKeys.HUD_AR_CHEVRONS_ALWAYS.key, defaults.chevronsAlways),
+            chevronsEvenHidden = prefs.getBoolean(SharedPreferencesKeys.HUD_CHEVRONS_EVEN_HIDDEN.key, defaults.chevronsEvenHidden),
             arPlacement = HudArArrow.Placement.fromKey(prefs.getString(SharedPreferencesKeys.HUD_AR_PLACEMENT.key, null))
                 ?: defaults.arPlacement,
             mapStreets = prefs.getBoolean(SharedPreferencesKeys.HUD_AR_MAP.key, defaults.mapStreets),
@@ -76,6 +77,7 @@ object HudOverlaySettings {
             .putString(SharedPreferencesKeys.HUD_AR_GAUGES.key, config.arGauges.key)
             .putBoolean(SharedPreferencesKeys.HUD_AR_CHEVRONS.key, config.chevrons)
             .putBoolean(SharedPreferencesKeys.HUD_AR_CHEVRONS_ALWAYS.key, config.chevronsAlways)
+            .putBoolean(SharedPreferencesKeys.HUD_CHEVRONS_EVEN_HIDDEN.key, config.chevronsEvenHidden)
             .putString(SharedPreferencesKeys.HUD_AR_PLACEMENT.key, config.arPlacement.key)
             .putBoolean(SharedPreferencesKeys.HUD_AR_MAP.key, config.mapStreets)
             .putBoolean(SharedPreferencesKeys.HUD_AR_MAP_EDGES.key, config.mapEdges)

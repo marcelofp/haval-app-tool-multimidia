@@ -789,9 +789,9 @@ object HudOverlayModel {
      * [always] (owner option): further away, or where another street comes first, the one still
      * chevron stays by the arcs pointing to the next road.
      */
-    fun chevronsFor(tbt: Tbt?, speedKmh: Double = 1.0, scripted: Boolean = false, always: Boolean = false): Chevrons? {
+    fun chevronsFor(tbt: Tbt?, speedKmh: Double = 1.0, scripted: Boolean = false, always: Boolean = false, evenHidden: Boolean = false): Chevrons? {
         if (speedKmh <= 0.0) return null
-        if (tbt == null || tbt.turnHidden) return null
+        if (tbt == null || (tbt.turnHidden && !evenHidden)) return null
         val meters = tbt.guideMeters ?: if (always) Float.MAX_VALUE else return null
         if (meters > CHEVRON_SHOW_M && !always) return null
         // Roundabout (owner): never while entering it, only to show the exit, so on the ring
@@ -1043,16 +1043,16 @@ object HudOverlayModel {
         fun resolved(): Colors = if (mode == ColorMode.BLUE) BLUE_COLORS else this
     }
 
-    /** "Azul": one family, light to deep. */
+    /** "Azul": everything in the first blue swatch, "Azul claro" (owner, 2026-10-26: shades read as white). */
     val BLUE_COLORS = Colors(
         mode = ColorMode.BLUE,
-        drive = rgb(63, 169, 255),
-        regen = rgb(150, 225, 255),
-        rpm = rgb(40, 110, 235),
-        street = rgb(130, 160, 205),
-        route = COLOR_ROUTE,
-        text = rgb(200, 228, 255),
-        chevron = COLOR_CHEVRON
+        drive = COLOR_DRIVE,
+        regen = COLOR_DRIVE,
+        rpm = COLOR_DRIVE,
+        street = COLOR_DRIVE,
+        route = COLOR_DRIVE,
+        text = COLOR_DRIVE,
+        chevron = COLOR_DRIVE
     )
 
     /** The picker's swatches: name and colour. */
@@ -1213,6 +1213,11 @@ object HudOverlayModel {
         val chevrons: Boolean = true,
         /** ...and one still chevron by the arcs at any distance, pointing to the next road. */
         val chevronsAlways: Boolean = false,
+        /**
+         * ...even while the next maneuver is hidden (further than [showTurnFromM]); with
+         * [chevronsAlways] (owner, 2026-10-26: "Sempre", the old "Sempre" became "Com próxima manobra").
+         */
+        val chevronsEvenHidden: Boolean = false,
         /** AR: arrow in the centre (under the speed) or between the native lane-assist lines. */
         val arPlacement: HudArArrow.Placement = HudArArrow.Placement.CENTER,
         /** AR: real streets round the car from OpenStreetMap, in light grey (beta, off by default). */
@@ -1401,7 +1406,9 @@ object HudOverlayModel {
             arcs = config.arcs,
             radar = radar,
             wideArcs = wideArcs,
-            chevrons = if (config.chevrons) chevronsFor(tbt, speedKmh, scriptedDemo, config.chevronsAlways) else null,
+            chevrons = if (config.chevrons) {
+                chevronsFor(tbt, speedKmh, scriptedDemo, config.chevronsAlways, config.chevronsAlways && config.chevronsEvenHidden)
+            } else null,
             font = config.font,
             colors = config.colors.resolved()
         )
