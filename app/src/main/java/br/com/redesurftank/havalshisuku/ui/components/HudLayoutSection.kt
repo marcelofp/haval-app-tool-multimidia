@@ -53,6 +53,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -244,7 +246,32 @@ private val DIALOG_HEIGHT = 344.dp
  * settings share a row (navigation and its extras; the chevrons' switch and when; the two
  * indicators). Mapa is for Navegação AR only.
  */
-private enum class HudSettingsTab(val title: String) { NAVIGATION("Navegação"), ARROW("Mapa"), BARS("Indicadores"), STYLE("Estilo") }
+private enum class HudSettingsTab(val title: String) { NAVIGATION("Navegação"), ARROW("Mapa"), BARS("Indicadores"), STYLE("Estilo"), COLORS("Cores") }
+
+/** The parts the Cores tab colours (owner, 2026-10-26), with how to read and change each. */
+private enum class HudColorItem(
+    val label: String,
+    /** Whether the part is on the HUD with [config] on [layout] (only those are offered). */
+    val shown: (HudOverlayModel.Config, HudOverlayModel.Layout) -> Boolean,
+    val get: (HudOverlayModel.Colors) -> Int,
+    val set: (HudOverlayModel.Colors, Int) -> HudOverlayModel.Colors,
+    val default: Int,
+    val focus: PreviewFocus?
+) {
+    TEXT("Texto", { _, _ -> true }, { it.text }, { c, v -> c.copy(text = v) }, HudOverlayModel.COLOR_TEXT, null),
+    DRIVE("EV", { c, l -> c.powerBar && c.copy(layout = l).gauges != HudOverlayModel.Gauges.NONE },
+        { it.drive }, { c, v -> c.copy(drive = v) }, HudOverlayModel.COLOR_DRIVE, PreviewFocus.GAUGES),
+    REGEN("Regen", { c, l -> c.powerBar && c.copy(layout = l).gauges != HudOverlayModel.Gauges.NONE },
+        { it.regen }, { c, v -> c.copy(regen = v) }, HudOverlayModel.COLOR_REGEN, PreviewFocus.GAUGES),
+    RPM("RPM", { c, l -> c.rpmBar && c.copy(layout = l).gauges != HudOverlayModel.Gauges.NONE },
+        { it.rpm }, { c, v -> c.copy(rpm = v) }, HudOverlayModel.COLOR_RPM, PreviewFocus.GAUGES),
+    STREET("Rua", { c, l -> l == HudOverlayModel.Layout.AR && c.navigation && c.mapStreets },
+        { it.street }, { c, v -> c.copy(street = v) }, HudOverlayModel.COLOR_STREET, PreviewFocus.ARROW),
+    ROUTE("Seta", { c, l -> l == HudOverlayModel.Layout.AR && c.navigation },
+        { it.route }, { c, v -> c.copy(route = v) }, HudOverlayModel.COLOR_ROUTE, PreviewFocus.ARROW),
+    CHEVRON("Aviso de curva", { c, _ -> c.navigation && c.chevrons },
+        { it.chevron }, { c, v -> c.copy(chevron = v) }, HudOverlayModel.COLOR_CHEVRON, PreviewFocus.CHEVRONS)
+}
 
 /**
  * Wide two-pane dialog for the 1920x720 head unit: the options on the left split into tabs so
@@ -260,6 +287,7 @@ internal fun HudNavigationSettingsDialog(
     onDismiss: () -> Unit
 ) {
     var tab by remember { mutableStateOf(HudSettingsTab.NAVIGATION) }
+    var colorItem by remember { mutableStateOf(HudColorItem.TEXT) }
     // The preview shows [shown]: a change is saved at once, but the preview first moves to the
     // example where it is visible and applies it ~300 ms later (owner), so it reads as a change.
     var shown by remember { mutableStateOf(config) }
@@ -332,8 +360,8 @@ internal fun HudNavigationSettingsDialog(
                                 ) { change(config.copy(showTurnFromM = HudOverlayModel.SHOW_TURN_FROM_OPTIONS[it]), PreviewFocus.FAR) }
                                 // Both chevron settings on one row: the switch, and when (owner: two settings).
                                 SwitchChoiceRow(
-                                    "Setas de aproximação",
-                                    "Azuis, para o lado da curva.",
+                                    "Aviso de curva",
+                                    "Setas para o lado da curva.",
                                     config.chevrons,
                                     listOf("Perto da curva", "Sempre"),
                                     if (config.chevronsAlways) 1 else 0,
@@ -388,6 +416,25 @@ internal fun HudNavigationSettingsDialog(
                                 ) { i, on ->
                                     change(if (i == 0) config.copy(powerBar = on) else config.copy(rpmBar = on), PreviewFocus.GAUGES)
                                 }
+                            }
+                            HudSettingsTab.COLORS -> {
+                                val colorful = config.colors.mode == HudOverlayModel.ColorMode.COLORFUL
+                                ChoiceRow(
+                                    "Cores",
+                                    "Escolhidas ou tudo em azul.",
+                                    listOf("Colorido", "Azul"),
+                                    HudOverlayModel.ColorMode.entries.indexOf(config.colors.mode),
+                                    info = "Colorido: escolha a cor de cada parte abaixo (o padrão são as cores de sempre). Azul: tudo em tons de azul, inclusive o texto."
+                                ) { change(config.copy(colors = config.colors.copy(mode = HudOverlayModel.ColorMode.entries[it]))) }
+                                // Only the parts that are on (owner): a part switched off elsewhere isn't offered.
+                                val items = HudColorItem.entries.filter { it.shown(config, layout) }
+                                val item = colorItem.takeIf { it in items } ?: items.first()
+                                ColorItemsRow(config.colors, items, item, enabled = colorful) { colorItem = it }
+                                SwatchRow(
+                                    selected = item.get(config.colors),
+                                    default = item.default,
+                                    enabled = colorful
+                                ) { v -> change(config.copy(colors = item.set(config.colors, v)), item.focus) }
                             }
                             HudSettingsTab.STYLE -> {
                                 ChoiceRow(
@@ -647,6 +694,87 @@ private fun Chips(labels: List<String>, isOn: (Int) -> Boolean, enabled: Boolean
                 )
             }
         }
+    }
+}
+
+/** The parts to colour, each a chip with its colour; the selected one is what the swatches change. */
+@Composable
+private fun ColorItemsRow(
+    colors: HudOverlayModel.Colors,
+    items: List<HudColorItem>,
+    selected: HudColorItem,
+    enabled: Boolean,
+    onSelect: (HudColorItem) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        OptionText(
+            "Parte",
+            "Só as que estão ligadas nas outras abas.",
+            enabled,
+            "EV e Regen: arco de potência acelerando e regenerando. RPM: arco de rotação. Rua: ruas do mapa 3D. Seta: a seta e a rota no mapa 3D. Aviso de curva: as setas que aparecem perto da curva. Texto: textos, ícones das manobras e faixas."
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {
+            for (item in items) {
+                val on = item == selected
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(if (on && enabled) ImpTokens.Accent.copy(alpha = 0.25f) else Color.Transparent)
+                        .border(1.dp, if (on && enabled) ImpTokens.Accent else ImpTokens.TrackOff, RoundedCornerShape(16.dp))
+                        .clickable(enabled = enabled) { onSelect(item) }
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Box(
+                        Modifier.size(14.dp).clip(RoundedCornerShape(7.dp))
+                            .background(Color(item.get(colors)).copy(alpha = if (enabled) 1f else 0.35f))
+                    )
+                    Text(
+                        item.label,
+                        color = if (!enabled) ImpTokens.TextMuted else if (on) Color.White else ImpTokens.TextSecondary,
+                        fontSize = 14.sp,
+                        fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** The colours to pick from ([HudOverlayModel.COLOR_SWATCHES]); [default]'s swatch is marked. */
+@Composable
+private fun SwatchRow(selected: Int, default: Int, enabled: Boolean, onPick: (Int) -> Unit) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+    ) {
+        for ((name, value) in HudOverlayModel.COLOR_SWATCHES) {
+            val on = value == selected
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(17.dp))
+                    .border(if (on) 3.dp else 1.dp, if (on && enabled) Color.White else ImpTokens.TrackOff, RoundedCornerShape(17.dp))
+                    .padding(4.dp)
+                    .clip(RoundedCornerShape(13.dp))
+                    .background(Color(value).copy(alpha = if (enabled) 1f else 0.35f))
+                    .clickable(enabled = enabled) { onPick(value) }
+                    .semantics { contentDescription = name }
+            ) {
+                // The colour the HUD always had for this part.
+                if (value == default) {
+                    Box(Modifier.size(6.dp).clip(RoundedCornerShape(3.dp)).background(Color.Black.copy(alpha = 0.55f)))
+                }
+            }
+        }
+        Text(
+            "• = padrão",
+            color = if (enabled) ImpTokens.TextSecondary else ImpTokens.TextMuted,
+            fontSize = 12.sp
+        )
     }
 }
 

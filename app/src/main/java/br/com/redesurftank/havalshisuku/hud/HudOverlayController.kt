@@ -47,6 +47,12 @@ object HudOverlayController {
     private val KEY_CURRENT = CarConstants.CAR_EV_INFO_CUR_CHARGE_CURRENT.value
     private val KEY_RPM = CarConstants.CAR_BASIC_ENGINE_SPEED.value
     private val KEY_SPEED = CarConstants.CAR_BASIC_VEHICLE_SPEED.value
+    /**
+     * The car's own EV power share (signed, regen < 0), as the cluster shows it. The arc used
+     * V x I against a fixed 100 kW and sat at 100 % on the highway while the car showed 60 %
+     * (owner, 2026-10-26). V x I stays the fallback until this arrives.
+     */
+    private val KEY_EV_POWER_PCT = CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value
     /** AR arrow redraw period while near a maneuver (~10 fps). */
     private const val AR_TICK_MS = 100L
     /** Stop extrapolating if Android Auto goes quiet for this long. */
@@ -82,6 +88,7 @@ object HudOverlayController {
     // Written from the CAN callback thread; only quantised changes reach the main thread.
     @Volatile private var voltage = Double.NaN
     @Volatile private var current = Double.NaN
+    @Volatile private var evPowerPercent = Double.NaN
     @Volatile private var rpm = Double.NaN
     @Volatile private var engineOn = false
     /** km/h; drives the AR arrow between Android Auto's ~1 Hz distance updates. */
@@ -107,6 +114,8 @@ object HudOverlayController {
             if (startedAtMs != 0L) return@post
             startedAtMs = SystemClock.elapsedRealtime()
             ServiceManager.getInstance().addDataChangedListener(dataListener)
+            // Not every theme subscribes to it, so ask for it ourselves.
+            ServiceManager.getInstance().ensureKeysMonitored(listOf(KEY_EV_POWER_PCT))
             seedFromCache()
             // First launch once the boot grace is over, even if no data arrives.
             main.postDelayed({ publish() }, BOOT_GRACE_MS)
@@ -213,6 +222,7 @@ object HudOverlayController {
         sm.getData(PowerFlow.KEY_ICE)?.let { onCarData(PowerFlow.KEY_ICE, it) }
         sm.getData(KEY_RPM)?.let { onCarData(KEY_RPM, it) }
         sm.getData(KEY_SPEED)?.let { onCarData(KEY_SPEED, it) }
+        sm.getData(KEY_EV_POWER_PCT)?.let { onCarData(KEY_EV_POWER_PCT, it) }
     }
 
     /** CAN callback thread. Cheap: posts to main only when a shown value (%, 0.1k rpm) changes. */
@@ -221,6 +231,7 @@ object HudOverlayController {
             KEY_VOLTAGE -> voltage = PowerFlowMapper.parseNumber(value)
             KEY_CURRENT -> current = PowerFlowMapper.parseNumber(value)
             KEY_RPM -> rpm = PowerFlowMapper.parseNumber(value)
+            KEY_EV_POWER_PCT -> evPowerPercent = PowerFlowMapper.parseNumber(value).takeIf { it.isFinite() && it in -100.0..100.0 } ?: Double.NaN
             PowerFlow.KEY_ICE -> engineOn = value?.trim() == "1"
             KEY_SPEED -> {
                 // Feeds the AR extrapolation (redraws on its own tick) and the wide arcs (redraw on a change).
@@ -242,9 +253,13 @@ object HudOverlayController {
             }
             else -> return
         }
-        val changed = if (key == KEY_VOLTAGE || key == KEY_CURRENT) {
-            val kw = if (voltage.isFinite() && current.isFinite()) voltage * current / 1000.0 else 0.0
-            val percent = HudOverlayModel.powerPercent(kw)
+        val changed = if (key == KEY_VOLTAGE || key == KEY_CURRENT || key == KEY_EV_POWER_PCT) {
+            val percent = if (evPowerPercent.isFinite()) {
+                evPowerPercent.roundToInt()
+            } else {
+                val kw = if (voltage.isFinite() && current.isFinite()) voltage * current / 1000.0 else 0.0
+                HudOverlayModel.powerPercent(kw)
+            }
             powerPercent.getAndSet(percent) != percent
         } else {
             val tenths = HudOverlayModel.rpmTenths(rpm, engineOn) ?: NO_RPM

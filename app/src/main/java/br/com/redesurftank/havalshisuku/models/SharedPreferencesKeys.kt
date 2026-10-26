@@ -428,6 +428,14 @@ enum class SharedPreferencesKeys(val key: String, val description: String) {
     HUD_ICON_STYLE("hudIconStyle", "HUD: ícones das manobras (classic, google)"),
     HUD_AR_MAP_EDGES("hudArMapEdges", "HUD Navegação AR: ruas do mapa só com as bordas (contorno)"),
     HUD_NAV_SHOW_TURN_FROM_M("hudNavShowTurnFromM", "HUD: mostrar a próxima manobra só a partir de N metros (0 = sempre)"),
+    HUD_COLOR_MODE("hudColorMode", "HUD: cores (colorful = escolhidas, blue = tudo em azul)"),
+    HUD_COLOR_DRIVE("hudColorDrive", "HUD: cor do arco de potência (uso)"),
+    HUD_COLOR_REGEN("hudColorRegen", "HUD: cor do arco de potência (regeneração)"),
+    HUD_COLOR_RPM("hudColorRpm", "HUD: cor do arco de rotação"),
+    HUD_COLOR_STREET("hudColorStreet", "HUD: cor das ruas do mapa"),
+    HUD_COLOR_ROUTE("hudColorRoute", "HUD: cor da rota/seta do mapa"),
+    HUD_COLOR_TEXT("hudColorText", "HUD: cor padrão do texto e ícones"),
+    HUD_COLOR_CHEVRON("hudColorChevron", "HUD: cor do aviso de curva (setas de aproximação)"),
     // Alerta de radar (Recursos). Read through RadarSettings.
     // The theme's turn-by-turn card (owner, 2026-10-25). Off: the theme gets "no navigation";
     // the radar and the HUD still read the real directions.

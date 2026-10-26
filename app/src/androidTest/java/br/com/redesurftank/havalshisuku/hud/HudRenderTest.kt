@@ -129,4 +129,38 @@ class HudRenderTest {
         render("6b_ar_google_fork_right", ar, 80, turn("FORK_RIGHT", 150, "Marginal Pinheiros"))
         render("6c_ar_google_ramp_right", ar, 90, turn("OFF_RAMP_RIGHT", 300, "Saída 12 - Centro"))
     }
+
+    /**
+     * The 2026-10-26 highway photo: 119 km/h on Navegação AR with the arcs, 60 % EV power, the
+     * turn hidden (trip on two lines). Rendered on both builds to compare the arcs.
+     */
+    @Test
+    fun renderArcs119() {
+        val ar = HudOverlayModel.Config(layout = HudOverlayModel.Layout.AR, showTurnFromM = 1000)
+        val far = turn("TURN_RIGHT", 4_200, "Rod. Pres. Dutra", 129_000, 112 * 60)
+        render("8_arcs_119_power60", ar, 119, far, power = 60)
+        render("8_arcs_119_power100", ar, 119, far, power = 100)
+        render("8_arcs_88_power60", ar, 88, far, power = 60)
+        // Engine on: the RPM arc inside the power arc.
+        render("8_arcs_119_rpm", ar, 119, far, power = 60, rpm = 31)
+        render("8_arcs_88_rpm", ar, 88, far, power = 60, rpm = 31)
+        render("8_arcs_99_power60", ar, 99, far, power = 60)
+        // Chevrons round the new circles: near turns, and "Sempre" far away.
+        render("8_arcs_119_turn30", ar, 119, turn("TURN_RIGHT", 30, "Saída 165"), power = 60, rpm = 31)
+        render("8_arcs_88_turn30", ar, 88, turn("TURN_RIGHT", 30, "Av. Paulista"), power = 60, rpm = 31)
+        render("8_arcs_119_slight70", ar, 119, turn("TURN_SLIGHT_RIGHT", 70, "Saída 165"), power = 60)
+        render("8_arcs_119_sempre", ar.copy(chevronsAlways = true), 119, turn("TURN_LEFT", 125, "Rod. Anhanguera"), power = 60)
+        render("8_arcs_88_sempre", ar.copy(chevronsAlways = true), 88, turn("TURN_LEFT", 125, "Av. Paulista"), power = 60)
+        // Colours (Cores tab): some picks, and Azul.
+        val picks = HudOverlayModel.Colors(
+            drive = HudOverlayModel.rgb(255, 150, 50), regen = HudOverlayModel.rgb(0, 220, 230),
+            rpm = HudOverlayModel.rgb(170, 120, 255), text = HudOverlayModel.rgb(255, 214, 64)
+        )
+        render("10_colors_picked", ar.copy(colors = picks), 88, turn("TURN_RIGHT", 30, "Av. Paulista"), power = 60, rpm = 31)
+        render("10_colors_blue", ar.copy(colors = picks.copy(mode = HudOverlayModel.ColorMode.BLUE)), 88, turn("TURN_RIGHT", 30, "Av. Paulista"), power = 60, rpm = 31)
+        // No arcs: the base for the arc-geometry simulator (2026-10-26).
+        val bare = ar.copy(powerBar = false, rpmBar = false)
+        render("9_base_119", bare, 119, far)
+        render("9_base_88", bare, 88, far)
+    }
 }

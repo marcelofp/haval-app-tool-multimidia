@@ -186,27 +186,25 @@ class HudArArrowTest {
     }
 
     @Test
-    fun `arcs span 195 degrees, 15 shorter at each end, clear of the column`() {
+    fun `arcs - circles from 140 to 345 degrees round the speed, clear of the column`() {
         val first = HudOverlayModel.arcTickDeg(0)
         val last = HudOverlayModel.arcTickDeg(HudOverlayModel.ARC_TICKS - 1)
         val slot = HudOverlayModel.ARC_SWEEP_DEG / HudOverlayModel.ARC_TICKS
-        assertEquals(150f + slot / 2, first, 0.01f)
+        assertEquals(140f + slot / 2, first, 0.01f)
         assertEquals(345f - slot / 2, last, 0.01f)
-        assertTrue(HudOverlayModel.ARC_POWER_R_OUT - HudOverlayModel.ARC_POWER_R_IN > HudOverlayModel.ARC_RPM_R_OUT - HudOverlayModel.ARC_RPM_R_IN)
-        assertTrue(HudOverlayModel.ARC_POWER_TICK_W > HudOverlayModel.ARC_RPM_TICK_W)
+        // The RPM line sits just inside the power ticks, clear of them.
+        assertTrue(HudOverlayModel.ARC_RPM_R + HudOverlayModel.ARC_RPM_W / 2 < HudOverlayModel.ARC_POWER_R_IN - 1f)
         assertTrue(HudOverlayModel.ARC_CY - HudOverlayModel.ARC_POWER_R_OUT > 40f)
-        // Stretched sideways for a three-digit speed, the height unchanged.
+        // Nearly a circle (owner, 2026-10-26: "1:1", then a little wider), centred on the speed.
+        assertTrue(HudOverlayModel.ARC_X_SCALE in 1f..1.15f)
         val (left, mid) = HudOverlayModel.arcPoint(180f, HudOverlayModel.ARC_POWER_R_OUT)
         assertEquals(HudOverlayModel.ARC_CX - HudOverlayModel.ARC_POWER_R_OUT * HudOverlayModel.ARC_X_SCALE, left, 0.01f)
         assertEquals(HudOverlayModel.ARC_CY, mid, 0.01f)
         assertEquals(HudOverlayModel.ARC_CY - HudOverlayModel.ARC_POWER_R_OUT, HudOverlayModel.arcPoint(270f, HudOverlayModel.ARC_POWER_R_OUT).second, 0.01f)
-        assertTrue(HudOverlayModel.ARC_X_SCALE > 1f)
-        // 6 px left of the speed; the street line is narrowed to keep clear of the arc.
-        // Two digits: 4 px left of the speed; three digits (wide): 6 px left, room for the "1".
-        assertEquals(HudOverlayModel.NATIVE_SPEED_CX - 4f, HudOverlayModel.ARC_CX, 0f)
-        assertEquals(HudOverlayModel.NATIVE_SPEED_CX - 6f, HudOverlayModel.ARC_WIDE_CX, 0f)
+        assertEquals(HudOverlayModel.NATIVE_SPEED_CX, HudOverlayModel.ARC_CX, 0f)
+        // The circle no longer reaches the street line's rows: it keeps the whole column.
         val right = HudOverlayModel.columnRightAt(HudOverlayModel.AR_STREET_BASELINE, HudOverlayModel.AR_STREET_SIZE)
-        assertTrue(right < HudOverlayModel.BOX_RIGHT && right > HudOverlayModel.BOX_CENTER_X + 40f)
+        assertEquals(HudOverlayModel.BOX_RIGHT, right, 0f)
         for (i in 0 until HudOverlayModel.ARC_TICKS) {
             val (x, y) = HudOverlayModel.arcPoint(HudOverlayModel.arcTickDeg(i), HudOverlayModel.ARC_POWER_R_OUT)
             if (y in HudOverlayModel.AR_STREET_BASELINE - HudOverlayModel.AR_STREET_SIZE..HudOverlayModel.AR_STREET_BASELINE) assertTrue("tick $i x=$x", x > right)
@@ -331,7 +329,7 @@ class HudArArrowTest {
         )
         val mapped = HudOverlayModel.Config(layout = HudOverlayModel.Layout.AR, mapStreets = true)
         val onRing = HudOverlayModel.frameFor(mapped, rb, 0, null, arProgress = 0.4f, streets = streets, speedKmh = 30.0)
-        assertTrue(onRing.tbt!!.routeMatched && !onRing.tbt!!.routeClear)
+        assertTrue(onRing.tbt!!.routeMatched)
         assertEquals(1, onRing.chevrons!!.side)
         assertNull(HudOverlayModel.frameFor(mapped, rb, 0, null, streets = streets, speedKmh = 30.0).chevrons)
         // Band above the arcs, inside the optics.
@@ -345,7 +343,7 @@ class HudArArrowTest {
         // 50 m: one, outside the arc's upper-right diagonal, pointing up-right.
         val s0 = at(50f)
         assertEquals(1, s0.size)
-        val start = HudOverlayModel.arcPoint(HudOverlayModel.CHEVRON_SHARP_START_DEG, HudOverlayModel.ARC_POWER_R_OUT + HudOverlayModel.CHEVRON_ARC_GAP)
+        val start = HudOverlayModel.chevronRingPoint(HudOverlayModel.CHEVRON_SHARP_START_DEG, wide = false)
         assertEquals(start.first, s0[0].x, 0.01f)
         assertEquals(start.second, s0[0].y, 0.01f)
         assertEquals(-45f, s0[0].dir, 2f)
@@ -385,7 +383,7 @@ class HudArArrowTest {
         assertTrue(soft.last().x > at(50f, sharp = false)[0].x)
         // Left mirrors it.
         assertEquals(180f, kotlin.math.abs(at(0f, side = -1).last().dir), 0.5f)
-        assertTrue(at(0f, side = -1).all { it.x < HudOverlayModel.ARC_CX })
+        assertTrue(at(0f, side = -1).all { it.x < HudOverlayModel.CHEVRON_RING_CX })
     }
 
     @Test
@@ -410,7 +408,7 @@ class HudArArrowTest {
         assertEquals(1f, HudOverlayModel.frameFor(ar.copy(chevronsAlways = true), d, 0, null, arMetersOverride = 90f).chevrons!!.lean, 0.001f)
         // It travels round the arc: on top pointing up, then to the turn's side, ending where the strip starts.
         val top = HudOverlayModel.chevronCompass(1, true, 0f)
-        assertEquals(HudOverlayModel.ARC_CX, top.x, 0.01f) // on top of the arc, round the native speed
+        assertEquals(HudOverlayModel.CHEVRON_RING_CX, top.x, 0.01f) // on top of the arc, round the native speed
         assertEquals(-90f, top.dir, 0.01f)
         val mid = HudOverlayModel.chevronCompass(1, true, 0.5f)
         assertTrue(mid.x > top.x && mid.y > top.y)
@@ -419,7 +417,7 @@ class HudArArrowTest {
         assertEquals(strip.x, near.x, 0.01f)
         assertEquals(strip.y, near.y, 0.01f)
         assertEquals(strip.dir, near.dir, 2f)
-        assertTrue(HudOverlayModel.chevronCompass(-1, false, 0.5f).x < HudOverlayModel.ARC_CX)
+        assertTrue(HudOverlayModel.chevronCompass(-1, false, 0.5f).x < HudOverlayModel.CHEVRON_RING_CX)
         assertTrue(top.y - HudOverlayModel.CHEVRON_STROKE >= 40f)
     }
 
@@ -440,7 +438,7 @@ class HudArArrowTest {
         assertEquals(HudOverlayModel.CHEVRON_ROAD_MAX_DEG, HudOverlayModel.roadBendAhead(floatArrayOf(0f, 0f, 0f, 30f, 100f, 31f, 200f, 32f))!!, 0.01f)
         val far = HudOverlayModel.chevronCompass(1, true, 0f, roadDeg = 30f)
         assertEquals(-60f, far.dir, 0.01f)
-        assertTrue(far.x > HudOverlayModel.ARC_CX)
+        assertTrue(far.x > HudOverlayModel.CHEVRON_RING_CX)
         // Close to the turn the bend no longer matters: the turn's diagonal.
         val near = HudOverlayModel.chevronCompass(1, true, 1f, roadDeg = -40f)
         assertEquals(HudOverlayModel.chevronCompass(1, true, 1f).x, near.x, 0.01f)
@@ -682,20 +680,25 @@ class HudArArrowTest {
     }
 
     @Test
-    fun `three-digit speeds - wider arcs starting later, with hysteresis`() {
+    fun `three-digit speeds - wider arcs ending earlier on the right, with hysteresis`() {
         assertTrue(!HudOverlayModel.wideArcs(99.0, wasWide = false))
         assertTrue(HudOverlayModel.wideArcs(100.0, wasWide = false))
         assertTrue(HudOverlayModel.wideArcs(96.0, wasWide = true))   // stays wide down to 95
         assertTrue(!HudOverlayModel.wideArcs(94.0, wasWide = true))
-        // Same 50 ticks and the same end; starts later at the bottom-left (where the "1" sits).
+        // A bigger circle (2026-10-26), its top at the HUD's top edge, ticks as long as before.
         val last = HudOverlayModel.ARC_TICKS - 1
-        assertEquals(HudOverlayModel.arcTickDeg(last), HudOverlayModel.arcTickDeg(last, wide = true), 0.5f)
-        assertTrue(HudOverlayModel.arcTickDeg(0, wide = true) > HudOverlayModel.arcTickDeg(0) + 10f)
-        // Wider at the sides, same height.
-        val (xn, _) = HudOverlayModel.arcPoint(180f, HudOverlayModel.ARC_RPM_R_IN)
-        val (xw, _) = HudOverlayModel.arcPoint(180f, HudOverlayModel.ARC_RPM_R_IN, wide = true)
-        assertTrue(xw < xn - 2f)
-        assertEquals(HudOverlayModel.arcPoint(270f, 56f).second, HudOverlayModel.arcPoint(270f, 56f, wide = true).second, 0.01f)
+        val o = HudOverlayModel.ARC_POWER_R_OUT
+        val (topX, topY) = HudOverlayModel.arcPoint(270f, o, wide = true)
+        assertEquals(HudOverlayModel.ARC_WIDE_CX, topX, 0.01f)
+        assertEquals(40f, topY, 0.01f)
+        val (lx, _) = HudOverlayModel.arcPoint(180f, o, wide = true)
+        assertEquals(HudOverlayModel.ARC_WIDE_CX - HudOverlayModel.ARC_WIDE_R_OUT * HudOverlayModel.ARC_X_SCALE, lx, 0.01f)
+        val tick = { w: Boolean -> HudOverlayModel.arcPoint(200f, HudOverlayModel.ARC_POWER_R_IN, w).let { (x, y) ->
+            HudOverlayModel.arcPoint(200f, o, w).let { (x2, y2) -> kotlin.math.hypot(x2 - x, y2 - y) } } }
+        assertEquals(tick(false), tick(true), 0.01f)
+        // Its right end ends above the native "km/h" (its top ~y 121 on a 3-digit speed).
+        val (_, endY) = HudOverlayModel.arcPoint(HudOverlayModel.arcTickDeg(last), o, wide = true)
+        assertTrue("end y=$endY", endY < 110f)
         // The street line still clears it, a little narrower.
         val narrow = HudOverlayModel.columnRightAt(HudOverlayModel.AR_STREET_BASELINE, HudOverlayModel.AR_STREET_SIZE, wide = true)
         assertTrue(narrow > HudOverlayModel.BOX_CENTER_X + 30f)
@@ -764,12 +767,62 @@ class HudArArrowTest {
     }
 
     @Test
-    fun `rpm arc - 50 ticks over 0 to 7000 rpm, at least one while turning`() {
-        assertEquals(0, HudOverlayModel.arcRpmTicks(0))
-        assertEquals(1, HudOverlayModel.arcRpmTicks(1)) // 100 rpm still lights one
-        assertEquals(25, HudOverlayModel.arcRpmTicks(35))
-        assertEquals(40, HudOverlayModel.arcRpmTicks(56))
-        assertEquals(50, HudOverlayModel.arcRpmTicks(75))
+    fun `rpm arc - 7 segments of 1000 rpm, filling continuously, a sliver while turning`() {
+        assertEquals(0f, HudOverlayModel.rpmArcLit(0), 0f)
+        assertTrue(HudOverlayModel.rpmArcLit(1) >= 0.02f) // 100 rpm still shows
+        assertEquals(0.5f, HudOverlayModel.rpmArcLit(35), 0.001f)
+        assertEquals(1f, HudOverlayModel.rpmArcLit(75), 0f)
+        for (wide in listOf(false, true)) {
+            val all = HudOverlayModel.rpmSegments(wide)
+            assertEquals(HudOverlayModel.ARC_RPM_SEGMENTS, all.size)
+            assertEquals(HudOverlayModel.ARC_START_DEG, all.first().first, 0.01f)
+            assertEquals(HudOverlayModel.ARC_START_DEG + HudOverlayModel.ARC_SWEEP_DEG, all.last().first + all.last().second, 0.01f)
+            // The same gap in pixels on both circles.
+            val gapDeg = all[1].first - (all[0].first + all[0].second)
+            val r = HudOverlayModel.arcRadius(HudOverlayModel.ARC_RPM_R, wide)
+            assertEquals(HudOverlayModel.ARC_RPM_GAP_PX, Math.toRadians(gapDeg.toDouble()).toFloat() * r, 0.01f)
+            // 3500 rpm: three whole segments and half the fourth.
+            val half = HudOverlayModel.rpmSegments(wide, HudOverlayModel.rpmArcLit(35))
+            assertEquals(4, half.size)
+            assertEquals(all[3].second / 2, half[3].second, 0.01f)
+        }
+    }
+
+    @Test
+    fun `colours - defaults are the old ones, Azul overrides every pick, frames carry them`() {
+        val d = HudOverlayModel.Colors()
+        assertEquals(HudOverlayModel.rgb(63, 169, 255), d.drive)
+        assertEquals(HudOverlayModel.rgb(80, 230, 120), d.regen)
+        assertEquals(HudOverlayModel.rgb(255, 64, 64), d.rpm)
+        // The default route keeps the original light-to-deep blue and chevron blue.
+        assertEquals(HudOverlayModel.rgb(120, 200, 255), HudOverlayModel.routeNear(d.route))
+        assertEquals(HudOverlayModel.rgb(90, 180, 255), d.chevron)
+        val picked = d.copy(drive = HudOverlayModel.rgb(255, 150, 50), text = HudOverlayModel.rgb(255, 214, 64))
+        assertEquals(picked, picked.resolved())
+        assertEquals(HudOverlayModel.BLUE_COLORS, picked.copy(mode = HudOverlayModel.ColorMode.BLUE).resolved())
+        assertEquals(HudOverlayModel.rgb(127, 127, 127), HudOverlayModel.mixColor(HudOverlayModel.rgb(0, 0, 0), HudOverlayModel.rgb(255, 255, 255), 0.5f))
+        val ar = HudOverlayModel.Config(layout = HudOverlayModel.Layout.AR, colors = picked.copy(mode = HudOverlayModel.ColorMode.BLUE))
+        assertEquals(HudOverlayModel.BLUE_COLORS, HudOverlayModel.frameFor(ar, null, 0, null).colors)
+        // The swatches hold every default, so each part can go back to it.
+        val swatches = HudOverlayModel.COLOR_SWATCHES.map { it.second }
+        for (c in listOf(d.drive, d.regen, d.rpm, d.street, d.route, d.text, d.chevron)) assertTrue(c in swatches)
+    }
+
+    @Test
+    fun `three-digit chevrons go round the big circle and stay in the HUD`() {
+        // "Sempre" far away: on top of the two-digit arc, at the top edge's limit on the big one.
+        val small = HudOverlayModel.chevronCompass(1, false, 0f)
+        assertEquals(HudOverlayModel.CHEVRON_RING_CX, small.x, 0.01f)
+        val big = HudOverlayModel.chevronCompass(1, false, 0f, wide = true)
+        assertEquals(HudOverlayModel.CHEVRON_RING_MIN_Y, big.y, 0.01f)
+        assertTrue(big.x > HudOverlayModel.ARC_WIDE_CX)
+        assertTrue(HudOverlayModel.chevronCompass(-1, false, 0f, wide = true).x < HudOverlayModel.ARC_WIDE_CX)
+        // The strip starts outside the big circle.
+        for (sharp in listOf(true, false)) {
+            val m = HudOverlayModel.chevronStrip(1, sharp, 0f, wide = true)[0]
+            val d = kotlin.math.hypot((m.x - HudOverlayModel.ARC_WIDE_CX) / HudOverlayModel.ARC_X_SCALE, m.y - HudOverlayModel.ARC_WIDE_CY)
+            assertTrue("d=$d", d > HudOverlayModel.ARC_WIDE_R_OUT + HudOverlayModel.CHEVRON_HALF_H)
+        }
     }
 
     @Test

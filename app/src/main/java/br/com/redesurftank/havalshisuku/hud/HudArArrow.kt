@@ -148,6 +148,8 @@ object HudArArrow {
     const val MAP_FAR_M = 700f
     /** Screen row of the car (0 m ahead). Above [BOTTOM], so the road isn't cut by the optics' edge. */
     const val MAP_NEAR_Y = 184f
+    /** The route drawn this far behind the car: past the HUD's bottom (y 200 is ~11 m back), like the roads. */
+    const val MAP_BEHIND_M = 12f
     /**
      * Depth scale (metres): distance is spread logarithmically between the bottom edge (the car)
      * and the horizon, so the far path stays readable. True perspective with a road-wide route
@@ -278,7 +280,14 @@ object HudArArrow {
         fun W.placed() = align?.let { ego(it) } ?: this
         val gray = ArrayList<List<Pt>>()
         for (road in roads) gray += mapRibbon(metres(road.pts).map { it.placed() }, MAP_HALF_M * road.width, MAP_MIN_PX * road.width, horizon)
-        val line = rawRoute.map { it.placed() }.filter { it.z <= MAP_FAR_M }
+        val ahead = rawRoute.map { it.placed() }.filter { it.z <= MAP_FAR_M }
+        // The route starts at the car, [MAP_NEAR_Y] above the HUD's bottom, while the grey roads
+        // run on behind it to the edge: carry it back [MAP_BEHIND_M] the way it starts, so both
+        // reach the bottom and fade there together (owner, 2026-10-26).
+        val line = if (ahead.size >= 2) {
+            val d = unit(ahead[0], ahead[1])
+            listOf(W(ahead[0].x - d.x * MAP_BEHIND_M, ahead[0].z - d.z * MAP_BEHIND_M)) + ahead
+        } else ahead
         val blue = mapRibbon(line, MAP_HALF_M, MAP_MIN_PX, horizon).lastOrNull().orEmpty()
         var head = FloatArray(0)
         var flag: Flag? = null

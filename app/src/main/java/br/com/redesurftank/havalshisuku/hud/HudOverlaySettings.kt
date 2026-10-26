@@ -35,9 +35,21 @@ object HudOverlaySettings {
             font = HudOverlayModel.Font.fromKey(prefs.getString(SharedPreferencesKeys.HUD_FONT.key, null)) ?: defaults.font,
             iconStyle = HudOverlayModel.IconStyle.fromKey(prefs.getString(SharedPreferencesKeys.HUD_ICON_STYLE.key, null)) ?: defaults.iconStyle,
             showTurnFromM = prefs.getInt(SharedPreferencesKeys.HUD_NAV_SHOW_TURN_FROM_M.key, defaults.showTurnFromM)
-                .takeIf { it in HudOverlayModel.SHOW_TURN_FROM_OPTIONS } ?: defaults.showTurnFromM
+                .takeIf { it in HudOverlayModel.SHOW_TURN_FROM_OPTIONS } ?: defaults.showTurnFromM,
+            colors = colors(prefs, defaults.colors)
         )
     }
+
+    private fun colors(prefs: SharedPreferences, d: HudOverlayModel.Colors) = HudOverlayModel.Colors(
+        mode = HudOverlayModel.ColorMode.fromKey(prefs.getString(SharedPreferencesKeys.HUD_COLOR_MODE.key, null)) ?: d.mode,
+        drive = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_DRIVE.key, d.drive),
+        regen = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_REGEN.key, d.regen),
+        rpm = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_RPM.key, d.rpm),
+        street = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_STREET.key, d.street),
+        route = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_ROUTE.key, d.route),
+        text = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_TEXT.key, d.text),
+        chevron = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_CHEVRON.key, d.chevron)
+    )
 
     /** The indicators pref, else the older arcs on/off one (arcs, or bars), else [default]. */
     private fun gauges(
@@ -70,6 +82,14 @@ object HudOverlaySettings {
             .putString(SharedPreferencesKeys.HUD_FONT.key, config.font.key)
             .putString(SharedPreferencesKeys.HUD_ICON_STYLE.key, config.iconStyle.key)
             .putInt(SharedPreferencesKeys.HUD_NAV_SHOW_TURN_FROM_M.key, config.showTurnFromM)
+            .putString(SharedPreferencesKeys.HUD_COLOR_MODE.key, config.colors.mode.key)
+            .putInt(SharedPreferencesKeys.HUD_COLOR_DRIVE.key, config.colors.drive)
+            .putInt(SharedPreferencesKeys.HUD_COLOR_REGEN.key, config.colors.regen)
+            .putInt(SharedPreferencesKeys.HUD_COLOR_RPM.key, config.colors.rpm)
+            .putInt(SharedPreferencesKeys.HUD_COLOR_STREET.key, config.colors.street)
+            .putInt(SharedPreferencesKeys.HUD_COLOR_ROUTE.key, config.colors.route)
+            .putInt(SharedPreferencesKeys.HUD_COLOR_TEXT.key, config.colors.text)
+            .putInt(SharedPreferencesKeys.HUD_COLOR_CHEVRON.key, config.colors.chevron)
             .remove(LEGACY_ENABLED_KEY)
             .apply()
         HudOverlayController.setConfig(config)

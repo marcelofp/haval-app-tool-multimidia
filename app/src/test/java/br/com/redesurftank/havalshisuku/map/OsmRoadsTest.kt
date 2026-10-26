@@ -2,6 +2,7 @@ package br.com.redesurftank.havalshisuku.map
 
 import br.com.redesurftank.havalshisuku.hud.HudArArrow
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -145,6 +146,43 @@ class OsmRoadsTest {
             road(-120f, 200f, 0f, 200f, 120f, 200f), // crossroads at 200 m
             road(0f, 150f, -40f, 150f, w = 0.55f)    // a driveway on the left at 150 m
         )
+    }
+
+    /** A ring of radius 15 at y 115 entered from below at (0, 100), exits right, ahead and left. */
+    private fun ring(): List<LocalRoad> {
+        fun road(vararg xy: Float) = LocalRoad(xy, 1f)
+        val pts = ArrayList<Float>()
+        for (k in 0..24) {
+            val th = Math.toRadians(-90.0 + 15.0 * k)
+            pts += (15 * kotlin.math.cos(th)).toFloat(); pts += (115 + 15 * kotlin.math.sin(th)).toFloat()
+        }
+        return listOf(
+            road(0f, -30f, 0f, 100f),
+            LocalRoad(pts.toFloatArray(), 1f),
+            road(15f, 115f, 140f, 115f),   // right (90 deg round a counter-clockwise ring)
+            road(0f, 130f, 0f, 260f),      // ahead (180)
+            road(-15f, 115f, -140f, 115f)  // left (270)
+        )
+    }
+
+    @Test
+    fun `roundabout - round the ring in the direction of travel and out of AA's exit`() {
+        val ahead = RoutePath.roundabout(ring(), 100f, 180f, clockwise = false)!!
+        val n = ahead.pts.size / 2
+        assertEquals(0f, ahead.pts[2 * n - 2], 1f)
+        assertTrue(ahead.pts[2 * n - 1] > 200f)
+        // Counter-clockwise (right-hand traffic): round the right-hand side to get there.
+        assertTrue((0 until n).any { ahead.pts[2 * it] > 10f })
+        assertTrue((0 until n).none { ahead.pts[2 * it] < -10f && ahead.pts[2 * it + 1] in 100f..130f })
+        val right = RoutePath.roundabout(ring(), 100f, 90f, clockwise = false)!!
+        assertTrue(right.pts[right.pts.size - 2] > 100f)
+        val left = RoutePath.roundabout(ring(), 100f, 270f, clockwise = false)!!
+        assertTrue(left.pts[left.pts.size - 2] < -100f)
+        // Clockwise: the left exit is the first, reached round the left-hand side.
+        val cwLeft = RoutePath.roundabout(ring(), 100f, 90f, clockwise = true)!!
+        assertTrue(cwLeft.pts[cwLeft.pts.size - 2] < -100f)
+        // No ring there: null (the plain route is used).
+        assertNull(RoutePath.roundabout(listOf(LocalRoad(floatArrayOf(0f, -30f, 0f, 300f), 1f)), 100f, 180f, false))
     }
 
     @Test

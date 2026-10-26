@@ -421,57 +421,51 @@ object HudOverlayModel {
 
     // ---- AR layout: power / RPM arcs round the native speed readout ----
     // Centred on the native speed (measured on the car 2026-10-17: about x 222, y 100), then moved
-    // down ~20 px then back up ~8 px at the owner's request (y 112). Each arc is 50 thin
-    // radial ticks over 195° (150°..345°): 15° shorter at each end than the 225° version, so it
-    // stops well short of the native "km/h". 2026-10-18: 6 px left of the speed and ~8 % bigger
-    // (owner), so the centre is no longer the speed's.
+    // down ~20 px then back up ~8 px at the owner's request (y 112). The power arc is 50 thin
+    // radial ticks. 2026-10-26 (owner): circles, not ellipses ("as 1:1 as possible"), each as far
+    // from the first digit as from the last, from 140° to 345° (nearly level on the right); RPM a
+    // line of 7 segments just inside the power ticks. Solved by simulation against a photo of the
+    // car's 119 km/h and the emulator's two-digit speed.
 
     /** Native speed readout's centre (measured on the car 2026-10-17); the AR arrow sits on it. */
     const val NATIVE_SPEED_CX = 222f
-    /**
-     * Two-digit speeds: 4 px left of the speed. 216 sat too close to the right digit, 220 looked
-     * off to the right on the windshield; owner: halfway (2026-10-19).
-     */
-    const val ARC_CX = 218f
-    /** Three-digit speeds (wide arcs): 6 px left, room for the leading "1". */
-    const val ARC_WIDE_CX = 216f
+    /** Two-digit speeds: a circle centred on the speed (~7 px from either digit). */
+    const val ARC_CX = 222f
     const val ARC_CY = 112f
-    /** 195°: from 150° (canvas angles, clockwise, bottom-left) to 345° (just above the right). */
-    const val ARC_START_DEG = 150f
-    const val ARC_SWEEP_DEG = 195f
+    /** From 140° (canvas angles, clockwise, bottom-left) to 345° (just above level on the right). */
+    const val ARC_START_DEG = 140f
+    const val ARC_SWEEP_DEG = 205f
     const val ARC_TICKS = 50
 
-    /** Outer arc, power: thicker, longer ticks. */
+    /** Outer arc, power: ticks from [ARC_POWER_R_IN] to [ARC_POWER_R_OUT]. */
     const val ARC_POWER_R_IN = 47.5f
     const val ARC_POWER_R_OUT = 56f
     const val ARC_POWER_TICK_W = 1.3f
 
-    /** Inner arc, RPM: thinner, shorter ticks. */
-    const val ARC_RPM_R_IN = 38f
-    const val ARC_RPM_R_OUT = 42f
-    const val ARC_RPM_TICK_W = 0.8f
+    /**
+     * Inner arc, RPM: a line just inside the power ticks (thin ticks crowded the digits), in
+     * [ARC_RPM_SEGMENTS] segments of 1000 rpm with [ARC_RPM_GAP_PX] between them, filling
+     * continuously (a segment can be partly lit).
+     */
+    const val ARC_RPM_R = 44.5f
+    const val ARC_RPM_W = 2.5f
+    const val ARC_RPM_SEGMENTS = 7
+    const val ARC_RPM_GAP_PX = 3f
     /** RPM arc full scale. */
     const val ARC_RPM_MAX = 7_000
 
     /** Canvas angle (degrees) of tick [i] of [ARC_TICKS], at the middle of its slot. */
-    fun arcTickDeg(i: Int, wide: Boolean = false): Float =
-        if (wide) ARC_WIDE_START_DEG + (i + 0.5f) * ARC_WIDE_SWEEP_DEG / ARC_TICKS
-        else ARC_START_DEG + (i + 0.5f) * ARC_SWEEP_DEG / ARC_TICKS
+    fun arcTickDeg(i: Int): Float = ARC_START_DEG + (i + 0.5f) * ARC_SWEEP_DEG / ARC_TICKS
 
     /**
-     * Arcs stretched sideways into a flat ellipse, so a three-digit speed fits inside; the
-     * height stays as it was (owner). Kept clear of the left column's street line.
+     * Three-digit speeds (owner, 2026-10-18): from [ARC_WIDE_ON_KMH] the arcs are a bigger circle,
+     * same ticks and angles. Back to normal below [ARC_WIDE_OFF_KMH], so cruising at ~100 doesn't
+     * make them flicker. 2026-10-26: radius [ARC_WIDE_R_OUT] with the ticks as long as on the
+     * normal arcs, as high as the HUD shows (its top at y 40), ~4.5 px from the "1" and the "9".
      */
-    const val ARC_X_SCALE = 1.3f
-
-    /**
-     * Three-digit speeds (owner, 2026-10-18): from [ARC_WIDE_ON_KMH] the arcs widen and start
-     * later at the bottom-left, where the leading "1" sits; same 50 ticks and end. Back to normal
-     * below [ARC_WIDE_OFF_KMH], so cruising at ~100 doesn't make them flicker.
-     */
-    const val ARC_WIDE_X_SCALE = 1.45f
-    const val ARC_WIDE_START_DEG = 165f
-    const val ARC_WIDE_SWEEP_DEG = 180f
+    const val ARC_WIDE_CX = 230f
+    const val ARC_WIDE_CY = 121f
+    const val ARC_WIDE_R_OUT = 81f
     const val ARC_WIDE_ON_KMH = 100.0
     const val ARC_WIDE_OFF_KMH = 95.0
 
@@ -479,13 +473,72 @@ object HudOverlayModel {
     fun wideArcs(speedKmh: Double, wasWide: Boolean): Boolean =
         if (wasWide) speedKmh >= ARC_WIDE_OFF_KMH else speedKmh >= ARC_WIDE_ON_KMH
 
-    /** Point [r] out from the arc centre at canvas angle [deg], on the stretched ellipse. */
+    /**
+     * Both arcs a little wider than tall (owner on the car, 2026-10-26: "um pouquinho mais largo,
+     * mesmo que saia da proporção"): x radii times this.
+     */
+    const val ARC_X_SCALE = 1.08f
+
+    /** Radius of a ring [r] out on the normal arcs; on the wide ones the same distance in from the outer edge. */
+    fun arcRadius(r: Float, wide: Boolean = false): Float = if (wide) ARC_WIDE_R_OUT - (ARC_POWER_R_OUT - r) else r
+
+    /**
+     * Point at canvas angle [deg], [r] out from the centre of the normal arcs (x times
+     * [ARC_X_SCALE]). On the wide ones [r] keeps its distance in from the outer edge (see
+     * [arcRadius]), so ticks and the RPM line are as long and as far apart as on the normal ones.
+     */
     fun arcPoint(deg: Float, r: Float, wide: Boolean = false): Pair<Float, Float> {
         val rad = Math.toRadians(deg.toDouble())
-        val xs = if (wide) ARC_WIDE_X_SCALE else ARC_X_SCALE
+        val rr = arcRadius(r, wide)
         val cx = if (wide) ARC_WIDE_CX else ARC_CX
-        return cx + (kotlin.math.cos(rad) * r * xs).toFloat() to ARC_CY + (kotlin.math.sin(rad) * r).toFloat()
+        val cy = if (wide) ARC_WIDE_CY else ARC_CY
+        return cx + (kotlin.math.cos(rad) * rr * ARC_X_SCALE).toFloat() to cy + (kotlin.math.sin(rad) * rr).toFloat()
     }
+
+    /**
+     * The RPM segments as (start, sweep) canvas degrees: the whole of each, or with [lit] (0..1
+     * of full scale) only its lit part, empty ones left out.
+     */
+    fun rpmSegments(wide: Boolean, lit: Float = 1f): List<Pair<Float, Float>> {
+        val gap = Math.toDegrees((ARC_RPM_GAP_PX / arcRadius(ARC_RPM_R, wide)).toDouble()).toFloat()
+        val seg = (ARC_SWEEP_DEG - gap * (ARC_RPM_SEGMENTS - 1)) / ARC_RPM_SEGMENTS
+        val f = lit.coerceIn(0f, 1f) * ARC_RPM_SEGMENTS
+        return (0 until ARC_RPM_SEGMENTS).mapNotNull { i ->
+            val part = (f - i).coerceIn(0f, 1f)
+            if (part <= 0f) null else ARC_START_DEG + i * (seg + gap) to seg * part
+        }
+    }
+
+    /** Lit share of the RPM arc for [tenths] (hundreds of rpm): at least a sliver while turning. */
+    fun rpmArcLit(tenths: Int): Float {
+        if (tenths <= 0) return 0f
+        return (tenths * 100f / ARC_RPM_MAX).coerceIn(0.02f, 1f)
+    }
+
+    /**
+     * Where the chevrons travel, [ARC_POWER_R_OUT] + [CHEVRON_ARC_GAP] round the arcs. Two
+     * digits: the oval the arcs were until 2026-10-26 (centre 218, 1.3x wide), clear of the new
+     * circle, so the chevrons stay where the owner tuned them. Three digits: round the big circle;
+     * its top is out of the HUD there, so the ring stops at [CHEVRON_RING_MIN_Y] on [side]'s side.
+     */
+    fun chevronRingPoint(deg: Float, wide: Boolean, side: Int = 1): Pair<Float, Float> {
+        if (!wide) {
+            val r = ARC_POWER_R_OUT + CHEVRON_ARC_GAP
+            val rad = Math.toRadians(deg.toDouble())
+            return CHEVRON_RING_CX + (kotlin.math.cos(rad) * r * CHEVRON_RING_X_SCALE).toFloat() to
+                ARC_CY + (kotlin.math.sin(rad) * r).toFloat()
+        }
+        val rr = ARC_WIDE_R_OUT + CHEVRON_ARC_GAP
+        val hidden = 90f - Math.toDegrees(kotlin.math.asin(((ARC_WIDE_CY - CHEVRON_RING_MIN_Y) / rr).toDouble())).toFloat()
+        val off = deg - 270f
+        val d = if (kotlin.math.abs(off) >= hidden) deg else 270f + (if (off > 0f || (off == 0f && side > 0)) hidden else -hidden)
+        val rad = Math.toRadians(d.toDouble())
+        return ARC_WIDE_CX + (kotlin.math.cos(rad) * rr * ARC_X_SCALE).toFloat() to ARC_WIDE_CY + (kotlin.math.sin(rad) * rr).toFloat()
+    }
+    const val CHEVRON_RING_CX = 218f
+    const val CHEVRON_RING_X_SCALE = 1.3f
+    /** Highest a chevron's centre goes on the three-digit ring: the HUD's top (40) + half a chevron. */
+    const val CHEVRON_RING_MIN_Y = 47f
 
     // ---- Approach chevrons ("setas de aproximação"), both HUD layouts.
     // From 100 m: one chevron, still, on the diagonal of the turn's side.
@@ -495,7 +548,7 @@ object HudOverlayModel {
     const val CHEVRON_SHOW_M = 100f
     /** The row starts moving at this distance. */
     const val CHEVRON_ANIM_M = 50f
-    /** Row of the flag/limit checks above the arcs (arc top is ARC_CY - ARC_POWER_R_OUT = 56). */
+    /** Row of the flag/limit checks above the arcs (two-digit arc top is ARC_CY - ARC_POWER_R_OUT = 56). */
     const val CHEVRON_CY = 48f
     /** The top edge row they end on, and how far out to the side of the HUD's centre. */
     const val CHEVRON_END_Y = 48f
@@ -533,15 +586,15 @@ object HudOverlayModel {
      * round the arc to the turn's side, leaning over, and at 1 it is exactly where the
      * near-turn chevrons start, so they take over without a jump.
      */
-    fun chevronCompass(side: Int, sharp: Boolean, lean: Float, roadDeg: Float = 0f, turnDeg: Float = 45f): ChevronMark {
+    fun chevronCompass(side: Int, sharp: Boolean, lean: Float, roadDeg: Float = 0f, turnDeg: Float = 45f, wide: Boolean = false): ChevronMark {
         val l = lean.coerceIn(0f, 1f)
         val start = if (sharp) CHEVRON_SHARP_START_DEG else CHEVRON_SOFT_START_DEG
         val end = if (side > 0) start else 540f - start
         // Far away it follows the road's own bends ([roadDeg], + right) instead of straight up.
         val base = 270f + roadDeg
-        val (x, y) = arcPoint(base + (end - base) * l, ARC_POWER_R_OUT + CHEVRON_ARC_GAP)
+        val (x, y) = chevronRingPoint(base + (end - base) * l, wide, side)
         // ...and ends exactly as the strip starts (its direction too, a soft turn's own angle).
-        val dir0 = chevronStrip(side, sharp, 0f, turnDeg)[0].dir
+        val dir0 = chevronStrip(side, sharp, 0f, turnDeg, wide)[0].dir
         val dirBase = -90f + roadDeg
         return ChevronMark(x, y, dirBase + (dir0 - dirBase) * l)
     }
@@ -610,9 +663,9 @@ object HudOverlayModel {
      * the top row (tangent -45 deg there, level at the end), then runs along the top edge; a
      * soft turn is the straight diagonal.
      */
-    private fun chevronWay(side: Int, sharp: Boolean, turnDeg: Float = 45f): FloatArray {
+    private fun chevronWay(side: Int, sharp: Boolean, turnDeg: Float = 45f, wide: Boolean = false): FloatArray {
         val deg = if (sharp) CHEVRON_SHARP_START_DEG else CHEVRON_SOFT_START_DEG
-        val (x0, y0) = arcPoint(if (side > 0) deg else 540f - deg, ARC_POWER_R_OUT + CHEVRON_ARC_GAP)
+        val (x0, y0) = chevronRingPoint(if (side > 0) deg else 540f - deg, wide, side)
         if (!sharp) {
             // At the turn's own angle (owner, 2026-10-25), shortened to stay in the band.
             val th = Math.toRadians(turnDeg.coerceIn(CHEVRON_MIN_DEG, CHEVRON_SHARP_DEG).toDouble())
@@ -673,9 +726,9 @@ object HudOverlayModel {
      * one, so it is not lined up while still on the curve; by [CHEVRON_ALIGNED_M] all four lie
      * in the row.
      */
-    fun chevronStrip(side: Int, sharp: Boolean, intensity: Float, turnDeg: Float = 45f): List<ChevronMark> {
+    fun chevronStrip(side: Int, sharp: Boolean, intensity: Float, turnDeg: Float = 45f, wide: Boolean = false): List<ChevronMark> {
         val meters = CHEVRON_ANIM_M * (1f - intensity.coerceIn(0f, 1f))
-        val way = chevronWay(side, sharp, turnDeg)
+        val way = chevronWay(side, sharp, turnDeg, wide)
         val total = wayLength(way)
         // Where the lone travel ends: the curve's end (sharp), or most of the diagonal (soft).
         val alone = if (sharp) wayLength(way, way.size / 2 - 2) else (total - 3 * CHEVRON_SPACING).coerceAtLeast(0f)
@@ -709,7 +762,7 @@ object HudOverlayModel {
         val top = baseline - textSize
         var right = BOX_RIGHT
         for (i in 0 until ARC_TICKS) {
-            val (x, y) = arcPoint(arcTickDeg(i, wide), ARC_POWER_R_OUT, wide)
+            val (x, y) = arcPoint(arcTickDeg(i), ARC_POWER_R_OUT, wide)
             if (y in top - 2f..baseline + 2f) right = minOf(right, x - 4f)
         }
         return right
@@ -778,12 +831,6 @@ object HudOverlayModel {
     fun arcPowerTicks(percent: Int): Int {
         if (percent == 0) return 0
         return ((kotlin.math.abs(percent) * ARC_TICKS + 50) / 100).coerceIn(1, ARC_TICKS)
-    }
-
-    /** Lit RPM ticks, from the left end, over 0..[ARC_RPM_MAX]; at least one while turning. */
-    fun arcRpmTicks(tenths: Int): Int {
-        if (tenths <= 0) return 0
-        return (tenths * 100 * ARC_TICKS / ARC_RPM_MAX.toFloat()).roundToInt().coerceIn(1, ARC_TICKS)
     }
 
     /**
@@ -876,6 +923,9 @@ object HudOverlayModel {
         return (1 until n).map { step * it }
     }
 
+    /** On the ring, leaving it: about this turn off the ring (+ right, counter-clockwise rings). */
+    const val RING_EXIT_TURN_DEG = 70f
+
     /** Exit angle the dynamic icon can draw: 1..360, else null (static icon). */
     fun drawableExitAngle(angle: Int?): Int? = angle?.takeIf { it in 1..360 }
 
@@ -946,8 +996,89 @@ object HudOverlayModel {
         /** Approach chevrons above the speed (null = none). */
         val chevrons: Chevrons? = null,
         /** Text face for everything written on the HUD. */
-        val font: Font = Font.LIGHT
+        val font: Font = Font.LIGHT,
+        /** What to draw with (already resolved: the blue set in [ColorMode.BLUE]). */
+        val colors: Colors = Colors()
     )
+
+    // ---- Colours (owner, 2026-10-26): "Colorido" lets each part be picked; "Azul" draws
+    // everything in one blue family. The defaults are the colours the HUD always had. ----
+
+    fun rgb(r: Int, g: Int, b: Int): Int = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+
+    val COLOR_DRIVE = rgb(63, 169, 255)
+    val COLOR_REGEN = rgb(80, 230, 120)
+    val COLOR_RPM = rgb(255, 64, 64)
+    val COLOR_STREET = rgb(200, 205, 215)
+    /** The route's deep (far) end; its near end is lighter (see [routeNear]). */
+    val COLOR_ROUTE = rgb(25, 105, 255)
+    val COLOR_TEXT = rgb(255, 255, 255)
+    val COLOR_CHEVRON = rgb(90, 180, 255)
+
+    enum class ColorMode(val key: String) {
+        COLORFUL("colorful"),
+        BLUE("blue");
+
+        companion object {
+            fun fromKey(key: String?): ColorMode? = entries.firstOrNull { it.key == key }
+        }
+    }
+
+    data class Colors(
+        val mode: ColorMode = ColorMode.COLORFUL,
+        /** Power arc while driving / regenerating (and the bars). */
+        val drive: Int = COLOR_DRIVE,
+        val regen: Int = COLOR_REGEN,
+        /** RPM arc. */
+        val rpm: Int = COLOR_RPM,
+        /** Map: the streets round the route, and the route / 3D arrow (the destination flag too). */
+        val street: Int = COLOR_STREET,
+        val route: Int = COLOR_ROUTE,
+        /** Text, maneuver icons and lanes. */
+        val text: Int = COLOR_TEXT,
+        /** The turn warning (approach chevrons). */
+        val chevron: Int = COLOR_CHEVRON
+    ) {
+        /** What the HUD draws with: the picks, or [BLUE_COLORS] in [ColorMode.BLUE]. */
+        fun resolved(): Colors = if (mode == ColorMode.BLUE) BLUE_COLORS else this
+    }
+
+    /** "Azul": one family, light to deep. */
+    val BLUE_COLORS = Colors(
+        mode = ColorMode.BLUE,
+        drive = rgb(63, 169, 255),
+        regen = rgb(150, 225, 255),
+        rpm = rgb(40, 110, 235),
+        street = rgb(130, 160, 205),
+        route = COLOR_ROUTE,
+        text = rgb(200, 228, 255),
+        chevron = COLOR_CHEVRON
+    )
+
+    /** The picker's swatches: name and colour. */
+    val COLOR_SWATCHES: List<Pair<String, Int>> = listOf(
+        "Branco" to COLOR_TEXT,
+        "Cinza" to COLOR_STREET,
+        "Azul claro" to COLOR_DRIVE,
+        "Azul céu" to COLOR_CHEVRON,
+        "Azul" to COLOR_ROUTE,
+        "Ciano" to rgb(0, 220, 230),
+        "Verde" to COLOR_REGEN,
+        "Amarelo" to rgb(255, 214, 64),
+        "Laranja" to rgb(255, 150, 50),
+        "Vermelho" to COLOR_RPM,
+        "Rosa" to rgb(255, 105, 180),
+        "Roxo" to rgb(170, 120, 255)
+    )
+
+    /** [a] towards [b] by [t] (0..1), opaque. */
+    fun mixColor(a: Int, b: Int, t: Float): Int {
+        fun ch(shift: Int) = (((a shr shift) and 0xFF) + (((b shr shift) and 0xFF) - ((a shr shift) and 0xFF)) * t).toInt().coerceIn(0, 255)
+        return rgb(ch(16), ch(8), ch(0))
+    }
+
+    /** The route's near (bottom) end: the original light blue for the default, else [route] lightened. */
+    fun routeNear(route: Int): Int = if (route == COLOR_ROUTE) rgb(120, 200, 255) else mixColor(route, COLOR_TEXT, 0.4f)
 
     /** Maneuver icon sets (owner, 2026-10-25: choose between them). */
     enum class IconStyle(val key: String) {
@@ -1097,7 +1228,9 @@ object HudOverlayModel {
          * just the trip line. 0 = always (see [SHOW_TURN_FROM_OPTIONS]). Default 1 km (owner,
          * 2026-10-25); a saved choice keeps its own value.
          */
-        val showTurnFromM: Int = 1000
+        val showTurnFromM: Int = 1000,
+        /** HUD colours (owner, 2026-10-26; the Cores tab). */
+        val colors: Colors = Colors()
     ) {
         val active: Boolean get() = layout != Layout.ORIGINAL
 
@@ -1147,8 +1280,17 @@ object HudOverlayModel {
     fun withMap(tbt: Tbt, streets: List<br.com.redesurftank.havalshisuku.map.LocalRoad>): Tbt {
         if (streets.isEmpty()) return tbt
         val turn = if (tbt.arDestination != null) 0f else tbt.arAngle
-        val route = br.com.redesurftank.havalshisuku.map.RoutePath.route(streets, tbt.arMeters, turn)
-            ?: br.com.redesurftank.havalshisuku.map.RoutePath.synthetic(tbt.arMeters, turn)
+        val rp = br.com.redesurftank.havalshisuku.map.RoutePath
+        // Roundabouts (owner, 2026-10-26): round the ring and out of our exit, not just an arrow.
+        // On the ring AA's distance is to the exit: follow the ring there and turn out.
+        val ring = if (!tbt.dynamicRoundabout) null else if (tbt.rbProgress > 0.02f || tbt.onRoundabout) {
+            rp.route(streets, tbt.guideMeters ?: tbt.arMeters, if (tbt.roundaboutClockwise) -RING_EXIT_TURN_DEG else RING_EXIT_TURN_DEG)
+        } else {
+            rp.roundabout(streets, tbt.arMeters, tbt.exitAngle!!.toFloat(), tbt.roundaboutClockwise)
+        }
+        val route = ring
+            ?: rp.route(streets, tbt.arMeters, turn)
+            ?: rp.synthetic(tbt.arMeters, turn)
         return tbt.copy(streets = streets, route = route.pts, routeMatched = route.matched, routeClear = route.nextOnSide)
     }
 
@@ -1219,7 +1361,7 @@ object HudOverlayModel {
         scriptedDemo: Boolean = false
     ): Frame {
         // "Original" layout: the window is only up for the radar, so draw nothing else.
-        if (!config.active) return Frame(tbt = null, powerPercent = null, rpmTenths = null, radar = radar)
+        if (!config.active) return Frame(tbt = null, powerPercent = null, rpmTenths = null, radar = radar, colors = config.colors.resolved())
         // Navegação: the camera takes the turn box. Navegação AR keeps the map (the card sits
         // on the left; the centre picture stays).
         val tbt = if (config.navigation && (radar == null || config.layout == Layout.AR)) {
@@ -1260,7 +1402,8 @@ object HudOverlayModel {
             radar = radar,
             wideArcs = wideArcs,
             chevrons = if (config.chevrons) chevronsFor(tbt, speedKmh, scriptedDemo, config.chevronsAlways) else null,
-            font = config.font
+            font = config.font,
+            colors = config.colors.resolved()
         )
     }
 
