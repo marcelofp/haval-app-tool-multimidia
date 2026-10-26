@@ -57,8 +57,6 @@ class HudOverlayRenderer {
         const val MAP_EDGE_STROKE = 3f
         const val MAP_EDGE_ALPHA = 255
         const val NATIVE_SPEED_BASELINE = 131f
-        /** Arc ticks: the inner end at this share of the colour (the outer end full). */
-        const val TICK_INNER_SHADE = 0.35f
         /** Preview mock of the car's speed (see drawNativeHud): digit cell, sizes, 3-digit centre. */
         const val NATIVE_DIGIT_CELL = 46f
         const val NATIVE_DIGIT_SIZE = 55f
@@ -270,7 +268,6 @@ class HudOverlayRenderer {
         routeNear = M.routeNear(c.route)
         routeFar = c.route
         chevronPaint.color = c.chevron
-        tickShaders.clear()
         mapGrayShaders.clear()
         mapBlueShaders.clear()
         blueShaders.clear()
@@ -645,42 +642,15 @@ class HudOverlayRenderer {
             if (i < lit) nLit = k else nOff = k
         }
         arcPaint.strokeWidth = width
-        // Each tick darker towards the centre (owner, 2026-10-26, "3D"): one radial gradient per
-        // colour does every tick at once, since they all point at the centre.
-        arcPaint.color = Color.WHITE
         if (nOff > 0) {
-            arcPaint.shader = tickShader(offColor, rIn, rOut, wide)
+            arcPaint.color = offColor
             canvas.drawLines(tickOff, 0, nOff, arcPaint)
         }
         if (nLit > 0) {
-            arcPaint.shader = tickShader(litColor, rIn, rOut, wide)
+            arcPaint.color = litColor
             canvas.drawLines(tickLit, 0, nLit, arcPaint)
         }
-        arcPaint.shader = null
     }
-
-    /** Gradients for [drawTicks], by colour and arc size (cleared with the colours). */
-    private val tickShaders = HashMap<Long, android.graphics.Shader>()
-
-    /** [color] at the outer end of a tick, [TICK_INNER_SHADE] of it at the inner end (alpha kept). */
-    private fun tickShader(color: Int, rIn: Float, rOut: Float, wide: Boolean): android.graphics.Shader =
-        tickShaders.getOrPut((color.toLong() shl 1) or (if (wide) 1L else 0L)) {
-            val cx = if (wide) M.ARC_WIDE_CX else M.ARC_CX
-            val cy = if (wide) M.ARC_WIDE_CY else M.ARC_CY
-            val inner = M.arcRadius(rIn, wide)
-            val outer = M.arcRadius(rOut, wide)
-            val dark = Color.argb(
-                Color.alpha(color), (Color.red(color) * TICK_INNER_SHADE).toInt(),
-                (Color.green(color) * TICK_INNER_SHADE).toInt(), (Color.blue(color) * TICK_INNER_SHADE).toInt()
-            )
-            android.graphics.RadialGradient(
-                cx, cy, outer, intArrayOf(dark, dark, color), floatArrayOf(0f, inner / outer, 1f),
-                android.graphics.Shader.TileMode.CLAMP
-            ).apply {
-                // The arcs are a little wider than tall (M.ARC_X_SCALE): stretch the rings to match.
-                setLocalMatrix(android.graphics.Matrix().apply { setScale(M.ARC_X_SCALE, 1f, cx, cy) })
-            }
-        }
 
     /** Outer arc: thick, long ticks; drive blue / regen green, both filling from the left. */
     private fun drawPowerArc(canvas: Canvas, percent: Int, wide: Boolean) {

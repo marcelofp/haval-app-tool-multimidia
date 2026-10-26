@@ -5,6 +5,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.material.icons.filled.Add
 import br.com.redesurftank.havalshisuku.hud.PreviewFocus
 import br.com.redesurftank.havalshisuku.hud.previewFocusIndex
 import br.com.redesurftank.havalshisuku.hud.previewScenarios
@@ -363,7 +365,7 @@ internal fun HudNavigationSettingsDialog(
                                 // while the next maneuver shows / that arrow even while it is hidden.
                                 SwitchChoiceRow(
                                     "Seta de direção",
-                                    "Para o lado da próxima curva.",
+                                    "Para o lado da curva.",
                                     config.chevrons,
                                     listOf("Perto das curvas", "Com próxima manobra", "Sempre"),
                                     when {
@@ -713,7 +715,8 @@ private fun ColorItemsRow(
     onSelect: (HudColorItem) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        // Tight and on one line: on the car the font is wider and "Seta de direção" wrapped (owner).
+        Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             for (item in items) {
                 val on = item == selected
                 Row(
@@ -723,7 +726,7 @@ private fun ColorItemsRow(
                         .background(if (on && enabled) ImpTokens.Accent.copy(alpha = 0.25f) else Color.Transparent)
                         .border(1.dp, if (on && enabled) ImpTokens.Accent else ImpTokens.TrackOff, RoundedCornerShape(16.dp))
                         .clickable(enabled = enabled) { onSelect(item) }
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                        .padding(horizontal = 9.dp, vertical = 8.dp)
                 ) {
                     Box(
                         Modifier.size(14.dp).clip(RoundedCornerShape(7.dp))
@@ -734,7 +737,9 @@ private fun ColorItemsRow(
                         color = if (!enabled) ImpTokens.TextMuted else if (on) Color.White else ImpTokens.TextSecondary,
                         fontSize = 14.sp,
                         fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
-                        modifier = Modifier.padding(start = 8.dp)
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(start = 6.dp)
                     )
                 }
             }
@@ -742,9 +747,19 @@ private fun ColorItemsRow(
     }
 }
 
-/** The colours to pick from ([HudOverlayModel.COLOR_SWATCHES]); [default]'s swatch is marked. */
+/**
+ * The colours to pick from ([HudOverlayModel.COLOR_SWATCHES]; [default]'s swatch is marked), then
+ * a custom one (owner, 2026-10-26): it shows the part's colour when that isn't a swatch.
+ */
 @Composable
 private fun SwatchRow(selected: Int, default: Int, enabled: Boolean, onPick: (Int) -> Unit) {
+    var picking by remember { mutableStateOf(false) }
+    if (picking) {
+        CustomColorDialog(selected, onDismiss = { picking = false }) {
+            picking = false
+            onPick(it)
+        }
+    }
     Row(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -770,11 +785,103 @@ private fun SwatchRow(selected: Int, default: Int, enabled: Boolean, onPick: (In
                 }
             }
         }
-        Text(
-            "• = padrão",
-            color = if (enabled) ImpTokens.TextSecondary else ImpTokens.TextMuted,
-            fontSize = 12.sp
-        )
+        val custom = HudOverlayModel.COLOR_SWATCHES.none { it.second == selected }
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(17.dp))
+                .border(if (custom) 3.dp else 1.dp, if (custom && enabled) Color.White else ImpTokens.TrackOff, RoundedCornerShape(17.dp))
+                .padding(4.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(
+                    if (custom) androidx.compose.ui.graphics.SolidColor(Color(selected))
+                    else androidx.compose.ui.graphics.Brush.sweepGradient(HUE_STOPS),
+                    alpha = if (enabled) 1f else 0.35f
+                )
+                .clickable(enabled = enabled) { picking = true }
+                .semantics { contentDescription = "Cor personalizada" }
+        ) {
+            if (!custom) Icon(Icons.Default.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+/** The hue wheel's colours (red round to red), for the custom button and the hue slider. */
+private val HUE_STOPS = listOf(0f, 60f, 120f, 180f, 240f, 300f, 360f)
+    .map { Color(android.graphics.Color.HSVToColor(floatArrayOf(it, 1f, 1f))) }
+
+/**
+ * A colour of one's own: hue, saturation and brightness, the result beside the title. Brightness
+ * starts at 30 %: on the HUD black is see-through, so darker would barely show.
+ */
+@Composable
+private fun CustomColorDialog(initial: Int, onDismiss: () -> Unit, onApply: (Int) -> Unit) {
+    val start = remember { FloatArray(3).also { android.graphics.Color.colorToHSV(initial, it) } }
+    var h by remember { mutableFloatStateOf(start[0]) }
+    var s by remember { mutableFloatStateOf(start[1]) }
+    var v by remember { mutableFloatStateOf(start[2].coerceIn(CUSTOM_MIN_BRIGHTNESS, 1f)) }
+    fun hsv(hh: Float, ss: Float, vv: Float) = android.graphics.Color.HSVToColor(floatArrayOf(hh, ss, vv))
+    val color = hsv(h, s, v)
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier.width(520.dp),
+            colors = CardDefaults.cardColors(containerColor = ImpTokens.Container),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.5.dp, ImpTokens.Accent)
+        ) {
+            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Cor personalizada", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    Box(Modifier.size(40.dp).clip(RoundedCornerShape(20.dp)).background(Color(color)))
+                }
+                GradientSlider("Matiz", h, 0f..360f, androidx.compose.ui.graphics.Brush.horizontalGradient(HUE_STOPS)) { h = it }
+                GradientSlider(
+                    "Saturação", s, 0f..1f,
+                    androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color(hsv(h, 0f, v)), Color(hsv(h, 1f, v))))
+                ) { s = it }
+                GradientSlider(
+                    "Brilho", v, CUSTOM_MIN_BRIGHTNESS..1f,
+                    androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color(hsv(h, s, CUSTOM_MIN_BRIGHTNESS)), Color(hsv(h, s, 1f))))
+                ) { v = it }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 4.dp)) {
+                    OutlinedButton(onClick = onDismiss) { Text("Cancelar", fontWeight = FontWeight.Bold) }
+                    Button(
+                        onClick = { onApply(color) },
+                        colors = ButtonDefaults.buttonColors(containerColor = ImpTokens.Accent, contentColor = Color.White)
+                    ) { Text("Aplicar", fontWeight = FontWeight.Bold) }
+                }
+            }
+        }
+    }
+}
+
+private const val CUSTOM_MIN_BRIGHTNESS = 0.3f
+
+/** A slider over its own gradient (the track is the gradient). */
+@Composable
+private fun GradientSlider(
+    label: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    track: androidx.compose.ui.graphics.Brush,
+    onChange: (Float) -> Unit
+) {
+    Column {
+        Text(label, color = ImpTokens.TextSecondary, fontSize = 13.sp)
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxWidth().height(32.dp)) {
+            Box(Modifier.fillMaxWidth().padding(horizontal = 10.dp).height(10.dp).clip(RoundedCornerShape(5.dp)).background(track))
+            androidx.compose.material3.Slider(
+                value = value,
+                onValueChange = onChange,
+                valueRange = range,
+                colors = androidx.compose.material3.SliderDefaults.colors(
+                    thumbColor = Color.White,
+                    activeTrackColor = Color.Transparent,
+                    inactiveTrackColor = Color.Transparent
+                )
+            )
+        }
     }
 }
 
