@@ -1,10 +1,13 @@
 package br.com.redesurftank.havalshisuku.ui.screens
 
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import br.com.redesurftank.havalshisuku.utils.ShizukuUtils
@@ -34,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import br.com.redesurftank.App
 import br.com.redesurftank.havalshisuku.TAG
@@ -63,6 +67,7 @@ import java.io.FileOutputStream
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.min
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -74,6 +79,33 @@ import rikka.shizuku.Shizuku
 /** O viewer 3D, distribuido pelo catalogo como qualquer outro app. */
 const val IMPULSE_HOME_PACKAGE = "com.havalh6.viewer"
 
+/**
+ * Hide packages right after a successful uninstall while PackageManager on the head unit
+ * can still report them briefly. Survives leaving/returning to Instalar Apps (TTL only).
+ * Event-driven refreshes clear entries when the system broadcasts PACKAGE_REMOVED/ADDED.
+ */
+private object PendingPackageRemovals {
+    private const val TTL_MS = 60_000L
+    private val untilByPackage = ConcurrentHashMap<String, Long>()
+
+    fun mark(packageName: String) {
+        untilByPackage[packageName] = SystemClock.elapsedRealtime() + TTL_MS
+    }
+
+    fun clear(packageName: String) {
+        untilByPackage.remove(packageName)
+    }
+
+    fun shouldHide(packageName: String): Boolean {
+        val until = untilByPackage[packageName] ?: return false
+        if (SystemClock.elapsedRealtime() >= until) {
+            untilByPackage.remove(packageName)
+            return false
+        }
+        return true
+    }
+}
+
 @Composable
 fun InstallAppsTab() {
     val context = LocalContext.current
@@ -84,6 +116,7 @@ fun InstallAppsTab() {
     var downloadProgress by remember { mutableStateOf<Map<String, Float>>(emptyMap()) }
     val pm = context.packageManager
     var refreshTrigger by remember { mutableIntStateOf(0) }
+    var pendingSystemUninstall by remember { mutableStateOf<String?>(null) }
     val requestPermissionLauncher =
             rememberLauncherForActivityResult(
                     ActivityResultContracts.StartActivityForResult()
@@ -92,9 +125,31 @@ fun InstallAppsTab() {
             rememberLauncherForActivityResult(
                     ActivityResultContracts.StartActivityForResult()
             ) {
-                scope.launch {
+                val pkg = pendingSystemUninstall
+                pendingSystemUninstall = null
+                scope.launch(Dispatchers.IO) {
                     delay(400)
-                    refreshTrigger++
+                    if (pkg != null) {
+                        val stillInstalled =
+                                runCatching { pm.getPackageInfo(pkg, 0) }.isSuccess
+                        if (stillInstalled) {
+                            // Dialog cancelado ou uninstall ainda em andamento: algumas tentativas
+                            // leves só neste pacote (sem rescan periódico da tela).
+                            var gone = false
+                            for (i in 0 until 4) {
+                                delay(700)
+                                if (runCatching { pm.getPackageInfo(pkg, 0) }.isFailure) {
+                                    gone = true
+                                    break
+                                }
+                            }
+                            if (gone) PendingPackageRemovals.mark(pkg)
+                            else PendingPackageRemovals.clear(pkg)
+                        } else {
+                            PendingPackageRemovals.mark(pkg)
+                        }
+                    }
+                    withContext(Dispatchers.Main) { refreshTrigger++ }
                 }
             }
     var showPermissionDialog by remember { mutableStateOf(false) }
@@ -147,6 +202,8 @@ fun InstallAppsTab() {
         while (true) {
             // Estas checagens rodam shells Shizuku (ls/md5sum de APKs grandes). Rodar fora da
             // main thread (IO) e num intervalo maior — o estado dos patches muda raramente.
+            // NÃO bump refreshTrigger aqui: rescan de apps instalados é caro e deve ser
+            // event-driven (uninstall/install + PACKAGE_* broadcasts).
             val states = withContext(Dispatchers.IO) {
                 listOf(
                     AndroidAutoPatchManager.isPatchInstalled(),
@@ -172,8 +229,46 @@ fun InstallAppsTab() {
                 homeGrantedVersion = homeVersion
                 withContext(Dispatchers.IO) { ViewerFirstRun.prepare(context, IMPULSE_HOME_PACKAGE) }
             }
-            refreshTrigger++
             delay(4000)
+        }
+    }
+
+    // Refresh da grade só quando o sistema avisa mudança de pacote — barato e imediato.
+    DisposableEffect(Unit) {
+        val receiver =
+                object : BroadcastReceiver() {
+                    override fun onReceive(ctx: Context?, intent: Intent?) {
+                        if (intent == null) return
+                        val pkg = intent.data?.schemeSpecificPart ?: return
+                        when (intent.action) {
+                            Intent.ACTION_PACKAGE_REMOVED -> {
+                                if (intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) return
+                                PendingPackageRemovals.mark(pkg)
+                                scope.launch { refreshTrigger++ }
+                            }
+                            Intent.ACTION_PACKAGE_ADDED,
+                            Intent.ACTION_PACKAGE_REPLACED -> {
+                                PendingPackageRemovals.clear(pkg)
+                                scope.launch { refreshTrigger++ }
+                            }
+                        }
+                    }
+                }
+        val filter =
+                IntentFilter().apply {
+                    addAction(Intent.ACTION_PACKAGE_ADDED)
+                    addAction(Intent.ACTION_PACKAGE_REMOVED)
+                    addAction(Intent.ACTION_PACKAGE_REPLACED)
+                    addDataScheme("package")
+                }
+        ContextCompat.registerReceiver(
+                context,
+                receiver,
+                filter,
+                ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        onDispose {
+            runCatching { context.unregisterReceiver(receiver) }
         }
     }
 
@@ -221,6 +316,7 @@ fun InstallAppsTab() {
     fun getInstalledVersion(packageName: String): String? {
         @Suppress("UNUSED_VARIABLE")
         val trigger = refreshTrigger
+        if (PendingPackageRemovals.shouldHide(packageName)) return null
         return try {
             val info = pm.getPackageInfo(packageName, 0)
             info.versionName
@@ -429,16 +525,16 @@ fun InstallAppsTab() {
             }
 
             if (success) {
+                // Esconde na hora: PM da central pode continuar listando o pacote por um tempo.
+                PendingPackageRemovals.mark(packageName)
+                withContext(Dispatchers.Main) { refreshTrigger++ }
                 runCatching {
                     ShizukuUtils.runCommandAndGetOutput(arrayOf("pkill", "-9", "-f", packageName))
-                }
-                delay(600)
-                withContext(Dispatchers.Main) {
-                    refreshTrigger++
                 }
             } else {
                 Log.d(TAG, "Falling back to system uninstaller for $packageName")
                 withContext(Dispatchers.Main) {
+                    pendingSystemUninstall = packageName
                     val intent = Intent(Intent.ACTION_DELETE).apply {
                         data = Uri.parse("package:$packageName")
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -455,6 +551,7 @@ fun InstallAppsTab() {
                             }
                             deletePackageLauncher.launch(altIntent)
                         } catch (e2: Exception) {
+                            pendingSystemUninstall = null
                             Log.e(TAG, "Failed fallback uninstaller", e2)
                         }
                     }
@@ -463,29 +560,54 @@ fun InstallAppsTab() {
         }
     }
 
-    val userInstalledApps = remember(refreshTrigger, apps) {
-        try {
-            val catalogPackages = apps.map { it.packageName }.toSet()
-            val systemFlags = ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP
-            pm.getInstalledApplications(0)
-                .filter { (it.flags and systemFlags) == 0 }
-                .filter { it.packageName != context.packageName && it.packageName != IMPULSE_HOME_PACKAGE }
-                .filter { it.packageName !in catalogPackages }
-                .map { appInfo ->
-                    val vName = try { pm.getPackageInfo(appInfo.packageName, 0).versionName ?: "" } catch (_: Exception) { "" }
-                    val label = try { pm.getApplicationLabel(appInfo).toString() } catch (_: Exception) { appInfo.packageName }
-                    AppInfo(
-                        name = label,
-                        version = vName,
-                        packageName = appInfo.packageName,
-                        link = "",
-                        iconUrl = null
-                    )
+    // Scan de apps de usuário só em IO e só quando refreshTrigger muda (evento), não a cada 4s.
+    var userInstalledApps by remember { mutableStateOf(listOf<AppInfo>()) }
+    LaunchedEffect(refreshTrigger, apps) {
+        val catalogPackages = apps.map { it.packageName }.toSet()
+        val selfPkg = context.packageName
+        userInstalledApps =
+                withContext(Dispatchers.IO) {
+                    try {
+                        val systemFlags =
+                                ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP
+                        pm.getInstalledApplications(0)
+                                .asSequence()
+                                .filter { (it.flags and systemFlags) == 0 }
+                                .filter {
+                                    it.packageName != selfPkg &&
+                                            it.packageName != IMPULSE_HOME_PACKAGE
+                                }
+                                .filter { it.packageName !in catalogPackages }
+                                .filter { !PendingPackageRemovals.shouldHide(it.packageName) }
+                                .map { appInfo ->
+                                    val vName =
+                                            try {
+                                                pm.getPackageInfo(appInfo.packageName, 0)
+                                                        .versionName
+                                                        ?: ""
+                                            } catch (_: Exception) {
+                                                ""
+                                            }
+                                    val label =
+                                            try {
+                                                pm.getApplicationLabel(appInfo).toString()
+                                            } catch (_: Exception) {
+                                                appInfo.packageName
+                                            }
+                                    AppInfo(
+                                            name = label,
+                                            version = vName,
+                                            packageName = appInfo.packageName,
+                                            link = "",
+                                            iconUrl = null
+                                    )
+                                }
+                                .sortedBy { it.name.lowercase() }
+                                .toList()
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
                 }
-                .sortedBy { it.name.lowercase() }
-        } catch (_: Exception) {
-            emptyList()
-        }
     }
     val allApps = apps + userInstalledApps
 
@@ -949,7 +1071,7 @@ fun InstallAppsTab() {
                                         shape = RoundedCornerShape(12.dp),
                                         color = ImpTokens.TrackOff
                                 ) {
-                                    val localIcon = remember(app.packageName) {
+                                    val localIcon = remember(app.packageName, isInstalled, refreshTrigger) {
                                         if (isInstalled) runCatching { pm.getApplicationIcon(app.packageName) }.getOrNull() else null
                                     }
                                     if (localIcon != null) {
