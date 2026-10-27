@@ -3745,7 +3745,7 @@ public class ServiceManager {
         }
     }
 
-    private boolean isVehicleReadyStateOff(String value) {
+    public static boolean isVehicleReadyStateOff(String value) {
         String safeValue = value != null ? value.trim() : "";
         return safeValue.equals("-1") || safeValue.equals("0");
     }

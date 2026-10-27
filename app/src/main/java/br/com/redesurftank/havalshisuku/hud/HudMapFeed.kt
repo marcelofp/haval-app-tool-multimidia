@@ -59,6 +59,19 @@ object HudMapFeed {
      */
     private const val PREFETCH_AFTER_STILL_MS = 60_000L
     private const val PREFETCH_RADIUS_M = 8_000.0
+    /**
+     * While driving (owner, 2026-10-24: the map was missing on a highway out of the usual
+     * area): every [AHEAD_EVERY_M] driven, the area [AHEAD_RADIUS_M] round a point
+     * [AHEAD_POINT_M] ahead goes to the background download as one request, so the road ahead
+     * is on disk before the car gets there. Only missing tiles go out.
+     */
+    private const val AHEAD_EVERY_M = 1_500.0
+    private const val AHEAD_POINT_M = 2_000.0
+    /**
+     * One request (~3x3 tiles): overpass-api.de took ~55 s for that on the 2026-10-24 drive, so
+     * a small box ahead every 1.5 km keeps up with ~100 km/h; a 4 km region (~9 requests) did not.
+     */
+    private const val AHEAD_RADIUS_M = 1_200.0
 
     @Volatile var lines: List<LocalRoad> = emptyList()
         private set
@@ -78,6 +91,28 @@ object HudMapFeed {
     /** Since when the car has stood still (elapsed ms); 0 = moving. */
     private var stillSinceMs = 0L
     private var prefetchedThisStop = false
+    /** Where the last download ahead was asked from (NaN = none yet). */
+    private var aheadFromLat = Double.NaN
+    private var aheadFromLon = Double.NaN
+
+    /**
+     * Where the last drawn map put the car (the fix run on at its speed, the heading after the
+     * street snap) and the raw GPS speed (m/s) and fix age: for the drive trace (hud_trace).
+     */
+    @Volatile var poseLat = Double.NaN
+        private set
+    @Volatile var poseLon = Double.NaN
+        private set
+    @Volatile var poseHeading = Double.NaN
+        private set
+    @Volatile var gpsBearing = Double.NaN
+        private set
+    fun gpsSpeedMps(): Float = speedMps
+    fun fixAgeMs(): Long = if (fixAtMs == 0L) -1L else SystemClock.elapsedRealtime() - fixAtMs
+
+    /** Share (0..1) of the tiles round the car that are loaded, for the HUD's loading bar. */
+    @Volatile var progress = 0f
+        private set
 
     // ---- map demo (debug `--es hudDemo map`): a virtual drive along real streets ----
     private const val DEMO_SPEED_MPS = 11f
@@ -236,14 +271,18 @@ object HudMapFeed {
             prefetchedThisStop = true
             OsmRoadStore.prefetch(lat, lon, PREFETCH_RADIUS_M)
         }
+        if (moving() && demo == null) prefetchAhead()
         val near = OsmRoadStore.roadsNear(lat, lon, LOAD_RADIUS_M) { handler?.post { rebuild() } }
+        val share = if (near.total > 0) near.loaded.toFloat() / near.total else 0f
+        val progressChanged = share != progress
+        progress = share
         if (near.complete != ready) {
             ready = near.complete
             ClusterPersistentEventLogger.log("hud_map_ready", mapOf("ready" to ready, "roads" to near.roads.size))
         }
         if (!near.complete) {
             // Part of the area is missing: a note on the HUD, not half a street map.
-            val changed = lines.isNotEmpty() || !pending
+            val changed = lines.isNotEmpty() || !pending || progressChanged
             lines = emptyList()
             pending = true
             if (changed) onChange?.invoke()
@@ -273,7 +312,28 @@ object HudMapFeed {
             val (dLat, dLon, dHeading) = demoPose(run, now)
             pLat = dLat; pLon = dLon; heading = dHeading
         }
+        poseLat = pLat
+        poseLon = pLon
+        poseHeading = heading
+        gpsBearing = bearing
         lines = OsmRoads.toLocal(near.roads, pLat, pLon, heading, AHEAD_M, SIDE_M, STEP_M)
         onChange?.invoke()
+    }
+
+    /** The background download of the area ahead, every [AHEAD_EVERY_M] driven. */
+    private fun prefetchAhead() {
+        if (!aheadFromLat.isNaN()) {
+            val dn = (lat - aheadFromLat) * 110_540.0
+            val de = (lon - aheadFromLon) * 111_320.0 * cos(Math.toRadians(lat))
+            if (dn * dn + de * de < AHEAD_EVERY_M * AHEAD_EVERY_M) return
+        }
+        val rad = Math.toRadians(bearing)
+        val aLat = lat + AHEAD_POINT_M * cos(rad) / 110_540.0
+        val aLon = lon + AHEAD_POINT_M * sin(rad) / (111_320.0 * cos(Math.toRadians(lat)))
+        // Busy with an earlier region: ask again on the next fix.
+        if (OsmRoadStore.prefetch(aLat, aLon, AHEAD_RADIUS_M, oneBox = true)) {
+            aheadFromLat = lat
+            aheadFromLon = lon
+        }
     }
 }

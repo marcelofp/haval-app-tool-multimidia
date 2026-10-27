@@ -24,15 +24,23 @@ import javax.net.ssl.SSLSocketFactory
 object OsmRoadStore {
     private const val TAG = "OsmRoadStore"
     /**
-     * Public Overpass servers, tried in turn, each with its own read timeout: measured
-     * 2026-10-19 for a 3x3-tile box, private.coffee answered in 2 s, overpass-api.de in 45 s
-     * (past the old 25 s limit), kumi.systems with 500.
+     * Public Overpass servers, tried in turn, each with its own read timeout. 2026-10-19:
+     * private.coffee answered a 3x3-tile box in 2 s. 2026-10-24 drive (owner: no map on the
+     * highway): private.coffee 0 of 143 (timeouts), kumi 0 of 68, overpass-api.de 75 answers
+     * (~30-55 s), 42 x 502; from the PC the same day overpass-api.de took 53 s, the others
+     * timed out. So overpass-api.de goes first, and a server that times out is skipped for
+     * [DEAD_MS] instead of costing 30 s on every request.
      */
     private val ENDPOINTS = listOf(
-        "https://overpass.private.coffee/api/interpreter" to 30_000,
         "https://overpass-api.de/api/interpreter" to 100_000,
+        "https://overpass.private.coffee/api/interpreter" to 30_000,
         "https://overpass.kumi.systems/api/interpreter" to 30_000
     )
+    /** A server that timed out or dropped the connection is skipped this long (not on a 5xx: that is load). */
+    private const val DEAD_MS = 15 * 60_000L
+    private val deadUntil = ConcurrentHashMap<String, Long>()
+    /** Tiles a background download is fetching now: the view waits for them instead of asking again. */
+    private val inFlight = ConcurrentHashMap.newKeySet<String>()
     private const val TTL_MS = 30L * 24 * 3600 * 1000
     private const val RETRY_MS = 30_000L
     /** A server that answered 429 (too many requests) is skipped this long. */
@@ -42,8 +50,8 @@ object OsmRoadStore {
     /** Per server, what the last request got (code or error), for the durable trace. */
     @Volatile private var lastOutcome = ""
 
-    /** The roads round a point and whether every tile there is loaded (else the view isn't whole). */
-    class Near(val roads: List<OsmRoad>, val complete: Boolean)
+    /** The roads round a point, whether every tile there is loaded (else the view isn't whole), and how many are. */
+    class Near(val roads: List<OsmRoad>, val complete: Boolean, val loaded: Int = 0, val total: Int = 0)
 
     private val io = Executors.newSingleThreadExecutor { r -> Thread(r, "OsmRoadStore") }
     /** The region download runs apart, so it never holds up the tiles the view needs now. */
@@ -91,7 +99,9 @@ object OsmRoadStore {
             background.execute { runCatching { saveUse() } }
         }
         if (missing.isNotEmpty()) io.execute { load(missing, onLoaded) }
-        return Near(out, OsmRoads.tilesAround(lat, lon, radiusM).all { tiles.containsKey(it.key) })
+        val around = OsmRoads.tilesAround(lat, lon, radiusM)
+        val loaded = around.count { tiles.containsKey(it.key) }
+        return Near(out, loaded == around.size, loaded, around.size)
     }
 
     private fun load(wanted: List<OsmRoads.Tile>, onLoaded: () -> Unit) {
@@ -103,7 +113,7 @@ object OsmRoadStore {
                 val cached = file.takeIf { it.isFile && System.currentTimeMillis() - it.lastModified() < TTL_MS }?.readText()
                 if (cached != null && OsmRoads.cacheOk(cached)) {
                     tiles[tile.key] = OsmRoads.parse(cached)
-                } else {
+                } else if (tile.key !in inFlight) {
                     toFetch += tile
                 }
             }
@@ -138,23 +148,26 @@ object OsmRoadStore {
      * Downloads, in the background, every tile within [radiusM] of the point that isn't on disk
      * (or is older than [TTL_MS]), in 3x3-tile boxes, so the map is there while driving without
      * the servers (they failed for a whole drive on 2026-10-19). Only what is missing goes out;
-     * when everything is there it costs a directory check. One region at a time.
+     * when everything is there it costs a directory check. One region at a time: false when
+     * one is still running (this one is not queued).
      */
-    fun prefetch(lat: Double, lon: Double, radiusM: Double) {
-        if (prefetching) return
+    fun prefetch(lat: Double, lon: Double, radiusM: Double, oneBox: Boolean = false): Boolean {
+        if (prefetching) return false
         prefetching = true
         background.execute {
             try {
-                prefetchRegion(lat, lon, radiusM)
+                prefetchRegion(lat, lon, radiusM, oneBox)
             } catch (t: Throwable) {
                 Log.w(TAG, "prefetch failed: ${t.message}")
             } finally {
                 prefetching = false
             }
         }
+        return true
     }
 
-    private fun prefetchRegion(lat: Double, lon: Double, radiusM: Double) {
+    /** [oneBox]: all missing tiles in one request (the small area ahead while driving), else 3x3 blocks. */
+    private fun prefetchRegion(lat: Double, lon: Double, radiusM: Double, oneBox: Boolean) {
         trim()
         val now = System.currentTimeMillis()
         val missing = OsmRoads.tilesAround(lat, lon, radiusM).filter { t ->
@@ -162,14 +175,15 @@ object OsmRoadStore {
             !(f.isFile && now - f.lastModified() < TTL_MS && OsmRoads.cacheOk(f.readText()))
         }
         if (missing.isEmpty()) return
-        val blocks = missing.groupBy { Math.floorDiv(it.x, 3) to Math.floorDiv(it.y, 3) }.values
-        ClusterPersistentEventLogger.log("hud_map_prefetch", mapOf("state" to "start", "tiles" to missing.size, "blocks" to blocks.size))
+        val blocks = if (oneBox) listOf(missing) else missing.groupBy { Math.floorDiv(it.x, 3) to Math.floorDiv(it.y, 3) }.values
+        ClusterPersistentEventLogger.log("hud_map_prefetch", mapOf("state" to "start", "tiles" to missing.size, "blocks" to blocks.size, "ahead" to oneBox))
         var done = 0
         var failed = 0
         for (block in blocks) {
             if (System.currentTimeMillis() < retryAfterMs) Thread.sleep((retryAfterMs - System.currentTimeMillis()).coerceIn(0L, RETRY_MS))
             val started = SystemClock.elapsedRealtime()
-            val json = fetch(block)
+            block.forEach { inFlight += it.key }
+            val json = try { fetch(block) } finally { block.forEach { inFlight -= it.key } }
             if (json == null) {
                 failed++
                 trace(false, block.size, 0, SystemClock.elapsedRealtime() - started)
@@ -182,8 +196,9 @@ object OsmRoadStore {
                 val own = OsmRoads.inTile(roads, tile)
                 file(tile).writeText(OsmRoads.toJson(own))
                 lastUse[tile.key] = System.currentTimeMillis()
-                // Already shown somewhere? Refresh the copy in memory too.
-                if (tiles.containsKey(tile.key)) tiles[tile.key] = own
+                // The area ahead goes straight into memory (the view may be waiting on it, see
+                // [inFlight]); a parked region only refreshes what is already shown.
+                if (oneBox || tiles.containsKey(tile.key)) tiles[tile.key] = own
             }
             done++
             trace(true, block.size, roads.size, SystemClock.elapsedRealtime() - started)
@@ -258,16 +273,27 @@ object OsmRoadStore {
         )
         val outcomes = ArrayList<String>()
         try {
+            val now = System.currentTimeMillis()
+            // All skipped (dead or rate-limited): try them anyway rather than give up.
+            val skipAny = ENDPOINTS.any { (url, _) -> now >= (limitedUntil[url] ?: 0L) && now >= (deadUntil[url] ?: 0L) }
             for ((url, timeout) in ENDPOINTS) {
                 val host = URL(url).host.substringBefore('.').let { if (it == "overpass") URL(url).host.split('.')[1] else it }
-                if (System.currentTimeMillis() < (limitedUntil[url] ?: 0L)) {
+                if (skipAny && System.currentTimeMillis() < (limitedUntil[url] ?: 0L)) {
                     outcomes += "$host:limited"
+                    continue
+                }
+                if (skipAny && System.currentTimeMillis() < (deadUntil[url] ?: 0L)) {
+                    outcomes += "$host:skipped"
                     continue
                 }
                 val (json, outcome) = fetch(url, query, timeout)
                 outcomes += "$host:$outcome"
                 if (outcome == "429") limitedUntil[url] = System.currentTimeMillis() + RATE_LIMIT_MS
-                if (json != null) return json
+                if (outcome in DEAD_OUTCOMES) deadUntil[url] = System.currentTimeMillis() + DEAD_MS
+                if (json != null) {
+                    deadUntil.remove(url)
+                    return json
+                }
             }
             retryAfterMs = System.currentTimeMillis() + RETRY_MS
             return null
@@ -275,6 +301,9 @@ object OsmRoadStore {
             lastOutcome = outcomes.joinToString(",")
         }
     }
+
+    /** Outcomes that mean the server is not answering at all (no internet is UnknownHostException: not its fault). */
+    private val DEAD_OUTCOMES = setOf("SocketTimeoutException", "SocketException", "ConnectException", "SSLHandshakeException")
 
     /** The answer and what happened ("200", an HTTP code, or the error's class). */
     private fun fetch(url: String, query: String, timeout: Int): Pair<String?, String> = try {

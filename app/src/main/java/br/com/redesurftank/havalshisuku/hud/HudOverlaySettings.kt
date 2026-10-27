@@ -5,62 +5,121 @@ import android.content.SharedPreferences
 import br.com.redesurftank.App
 import br.com.redesurftank.havalshisuku.models.SharedPreferencesKeys
 
-/** Reads and writes [HudOverlayModel.Config] in the app prefs. */
+/**
+ * The HUD style picked in Telas ([HudOverlayModel.Preset]) and the owner's own one,
+ * "Personalizado", in the app prefs. The fixed styles live in code; only Personalizado's options
+ * are saved, and it exists once [SharedPreferencesKeys.HUD_CUSTOM_BASE] is set (owner,
+ * 2026-10-27: no migration from the old layouts, a car starts on Original).
+ */
 object HudOverlaySettings {
-    /** The on/off switch this replaced; a car that had it on starts on the Navigation layout. */
-    private const val LEGACY_ENABLED_KEY = "hudOverlayEnabled"
-
     fun prefs(): SharedPreferences =
         App.getDeviceProtectedContext().getSharedPreferences("haval_prefs", Context.MODE_PRIVATE)
 
-    fun load(prefs: SharedPreferences = prefs()): HudOverlayModel.Config {
-        val defaults = HudOverlayModel.Config()
+    /** The selected style; Personalizado only while it exists. */
+    fun preset(prefs: SharedPreferences = prefs()): HudOverlayModel.Preset {
+        val p = HudOverlayModel.Preset.fromKey(prefs.getString(SharedPreferencesKeys.HUD_PRESET.key, null))
+            ?: return HudOverlayModel.Preset.ORIGINAL
+        return if (p == HudOverlayModel.Preset.CUSTOM && customBase(prefs) == null) HudOverlayModel.Preset.ORIGINAL else p
+    }
+
+    /** The style Personalizado was made from, or null when there is no Personalizado. */
+    fun customBase(prefs: SharedPreferences = prefs()): HudOverlayModel.Preset? =
+        HudOverlayModel.Preset.fromKey(prefs.getString(SharedPreferencesKeys.HUD_CUSTOM_BASE.key, null))
+            ?.takeIf { it in HudOverlayModel.Preset.FIXED }
+
+    /** What the HUD draws: the selected style's options. */
+    fun load(prefs: SharedPreferences = prefs()): HudOverlayModel.Config = configOf(preset(prefs), prefs)
+
+    /** [preset]'s options (Personalizado: the saved ones, else Original's). */
+    fun configOf(preset: HudOverlayModel.Preset, prefs: SharedPreferences = prefs()): HudOverlayModel.Config =
+        preset.config ?: custom(prefs) ?: HudOverlayModel.Preset.ORIGINAL.config!!
+
+    /** Personalizado's options, or null when there is none. */
+    fun custom(prefs: SharedPreferences = prefs()): HudOverlayModel.Config? {
+        val base = customBase(prefs)?.config ?: return null
         val layout = HudOverlayModel.Layout.fromKey(prefs.getString(SharedPreferencesKeys.HUD_LAYOUT.key, null))
-            ?: if (prefs.getBoolean(LEGACY_ENABLED_KEY, false)) HudOverlayModel.Layout.NAVIGATION else defaults.layout
+            ?.takeIf { it != HudOverlayModel.Layout.ORIGINAL } ?: base.layout
         return HudOverlayModel.Config(
             layout = layout,
-            navigation = prefs.getBoolean(SharedPreferencesKeys.HUD_NAV_ENABLED.key, defaults.navigation),
-            smallArrowWhenFar = prefs.getBoolean(SharedPreferencesKeys.HUD_NAV_SMALL_WHEN_FAR.key, defaults.smallArrowWhenFar),
-            trip = prefs.getBoolean(SharedPreferencesKeys.HUD_NAV_TRIP.key, defaults.trip),
-            powerBar = prefs.getBoolean(SharedPreferencesKeys.HUD_POWER_BAR.key, defaults.powerBar),
-            rpmBar = prefs.getBoolean(SharedPreferencesKeys.HUD_RPM_BAR.key, defaults.rpmBar),
-            navGauges = gauges(prefs, SharedPreferencesKeys.HUD_NAV_GAUGES, SharedPreferencesKeys.HUD_NAV_ARCS, defaults.navGauges),
-            arGauges = gauges(prefs, SharedPreferencesKeys.HUD_AR_GAUGES, SharedPreferencesKeys.HUD_AR_ARCS, defaults.arGauges),
-            chevrons = prefs.getBoolean(SharedPreferencesKeys.HUD_AR_CHEVRONS.key, defaults.chevrons),
+            navigation = prefs.getBoolean(SharedPreferencesKeys.HUD_NAV_ENABLED.key, base.navigation),
+            smallArrowWhenFar = prefs.getBoolean(SharedPreferencesKeys.HUD_NAV_SMALL_WHEN_FAR.key, base.smallArrowWhenFar),
+            trip = prefs.getBoolean(SharedPreferencesKeys.HUD_NAV_TRIP.key, base.trip),
+            powerBar = prefs.getBoolean(SharedPreferencesKeys.HUD_POWER_BAR.key, base.powerBar),
+            rpmBar = prefs.getBoolean(SharedPreferencesKeys.HUD_RPM_BAR.key, base.rpmBar),
+            gauges = HudOverlayModel.Gauges.fromKey(prefs.getString(SharedPreferencesKeys.HUD_GAUGES.key, null)) ?: base.gauges,
+            chevrons = prefs.getBoolean(SharedPreferencesKeys.HUD_AR_CHEVRONS.key, base.chevrons),
+            chevronsAlways = prefs.getBoolean(SharedPreferencesKeys.HUD_AR_CHEVRONS_ALWAYS.key, base.chevronsAlways),
+            chevronsEvenHidden = prefs.getBoolean(SharedPreferencesKeys.HUD_CHEVRONS_EVEN_HIDDEN.key, base.chevronsEvenHidden),
             arPlacement = HudArArrow.Placement.fromKey(prefs.getString(SharedPreferencesKeys.HUD_AR_PLACEMENT.key, null))
-                ?: defaults.arPlacement,
-            mapStreets = prefs.getBoolean(SharedPreferencesKeys.HUD_AR_MAP.key, defaults.mapStreets)
+                ?: base.arPlacement,
+            mapStreets = prefs.getBoolean(SharedPreferencesKeys.HUD_AR_MAP.key, base.mapStreets),
+            mapEdges = prefs.getBoolean(SharedPreferencesKeys.HUD_AR_MAP_EDGES.key, base.mapEdges),
+            font = HudOverlayModel.Font.fromKey(prefs.getString(SharedPreferencesKeys.HUD_FONT.key, null)) ?: base.font,
+            iconStyle = HudOverlayModel.IconStyle.fromKey(prefs.getString(SharedPreferencesKeys.HUD_ICON_STYLE.key, null)) ?: base.iconStyle,
+            showTurnFromM = prefs.getInt(SharedPreferencesKeys.HUD_NAV_SHOW_TURN_FROM_M.key, base.showTurnFromM)
+                .takeIf { it in HudOverlayModel.SHOW_TURN_FROM_OPTIONS } ?: base.showTurnFromM,
+            colors = colors(prefs, base.colors)
         )
     }
 
-    /** The indicators pref, else the older arcs on/off one (arcs, or bars), else [default]. */
-    private fun gauges(
-        prefs: SharedPreferences,
-        key: SharedPreferencesKeys,
-        legacyArcs: SharedPreferencesKeys,
-        default: HudOverlayModel.Gauges
-    ): HudOverlayModel.Gauges =
-        HudOverlayModel.Gauges.fromKey(prefs.getString(key.key, null))
-            ?: if (prefs.contains(legacyArcs.key)) {
-                if (prefs.getBoolean(legacyArcs.key, false)) HudOverlayModel.Gauges.ARCS else HudOverlayModel.Gauges.BARS
-            } else default
+    private fun colors(prefs: SharedPreferences, d: HudOverlayModel.Colors) = HudOverlayModel.Colors(
+        mode = HudOverlayModel.ColorMode.fromKey(prefs.getString(SharedPreferencesKeys.HUD_COLOR_MODE.key, null)) ?: d.mode,
+        drive = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_DRIVE.key, d.drive),
+        regen = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_REGEN.key, d.regen),
+        rpm = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_RPM.key, d.rpm),
+        street = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_STREET.key, d.street),
+        route = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_ROUTE.key, d.route),
+        text = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_TEXT.key, d.text),
+        chevron = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_CHEVRON.key, d.chevron)
+    )
 
-    /** Saves [config] and applies it to the HUD at once. */
-    fun save(config: HudOverlayModel.Config, prefs: SharedPreferences = prefs()) {
+    /** Selects [preset] and applies it to the HUD at once. */
+    fun select(preset: HudOverlayModel.Preset, prefs: SharedPreferences = prefs()) {
+        prefs.edit().putString(SharedPreferencesKeys.HUD_PRESET.key, preset.key).apply()
+        HudOverlayController.setConfig(load(prefs))
+    }
+
+    /**
+     * Saves [config] as Personalizado (made from [base]), selects it and applies it to the HUD
+     * at once. Replaces any Personalizado there was.
+     */
+    fun saveCustom(config: HudOverlayModel.Config, base: HudOverlayModel.Preset, prefs: SharedPreferences = prefs()) {
         prefs.edit()
+            .putString(SharedPreferencesKeys.HUD_PRESET.key, HudOverlayModel.Preset.CUSTOM.key)
+            .putString(SharedPreferencesKeys.HUD_CUSTOM_BASE.key, base.key)
             .putString(SharedPreferencesKeys.HUD_LAYOUT.key, config.layout.key)
             .putBoolean(SharedPreferencesKeys.HUD_NAV_ENABLED.key, config.navigation)
             .putBoolean(SharedPreferencesKeys.HUD_NAV_SMALL_WHEN_FAR.key, config.smallArrowWhenFar)
             .putBoolean(SharedPreferencesKeys.HUD_NAV_TRIP.key, config.trip)
             .putBoolean(SharedPreferencesKeys.HUD_POWER_BAR.key, config.powerBar)
             .putBoolean(SharedPreferencesKeys.HUD_RPM_BAR.key, config.rpmBar)
-            .putString(SharedPreferencesKeys.HUD_NAV_GAUGES.key, config.navGauges.key)
-            .putString(SharedPreferencesKeys.HUD_AR_GAUGES.key, config.arGauges.key)
+            .putString(SharedPreferencesKeys.HUD_GAUGES.key, config.gauges.key)
             .putBoolean(SharedPreferencesKeys.HUD_AR_CHEVRONS.key, config.chevrons)
+            .putBoolean(SharedPreferencesKeys.HUD_AR_CHEVRONS_ALWAYS.key, config.chevronsAlways)
+            .putBoolean(SharedPreferencesKeys.HUD_CHEVRONS_EVEN_HIDDEN.key, config.chevronsEvenHidden)
             .putString(SharedPreferencesKeys.HUD_AR_PLACEMENT.key, config.arPlacement.key)
             .putBoolean(SharedPreferencesKeys.HUD_AR_MAP.key, config.mapStreets)
-            .remove(LEGACY_ENABLED_KEY)
+            .putBoolean(SharedPreferencesKeys.HUD_AR_MAP_EDGES.key, config.mapEdges)
+            .putString(SharedPreferencesKeys.HUD_FONT.key, config.font.key)
+            .putString(SharedPreferencesKeys.HUD_ICON_STYLE.key, config.iconStyle.key)
+            .putInt(SharedPreferencesKeys.HUD_NAV_SHOW_TURN_FROM_M.key, config.showTurnFromM)
+            .putString(SharedPreferencesKeys.HUD_COLOR_MODE.key, config.colors.mode.key)
+            .putInt(SharedPreferencesKeys.HUD_COLOR_DRIVE.key, config.colors.drive)
+            .putInt(SharedPreferencesKeys.HUD_COLOR_REGEN.key, config.colors.regen)
+            .putInt(SharedPreferencesKeys.HUD_COLOR_RPM.key, config.colors.rpm)
+            .putInt(SharedPreferencesKeys.HUD_COLOR_STREET.key, config.colors.street)
+            .putInt(SharedPreferencesKeys.HUD_COLOR_ROUTE.key, config.colors.route)
+            .putInt(SharedPreferencesKeys.HUD_COLOR_TEXT.key, config.colors.text)
+            .putInt(SharedPreferencesKeys.HUD_COLOR_CHEVRON.key, config.colors.chevron)
             .apply()
         HudOverlayController.setConfig(config)
+    }
+
+    /** Removes Personalizado; if it was selected, its base style takes over. */
+    fun discardCustom(prefs: SharedPreferences = prefs()) {
+        val base = customBase(prefs) ?: HudOverlayModel.Preset.ORIGINAL
+        val wasSelected = preset(prefs) == HudOverlayModel.Preset.CUSTOM
+        prefs.edit().remove(SharedPreferencesKeys.HUD_CUSTOM_BASE.key).apply()
+        if (wasSelected) select(base, prefs)
     }
 }

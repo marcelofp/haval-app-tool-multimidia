@@ -180,6 +180,8 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
         persistDismissals()
         recomputeWarningState("LAMP_LATCH_EXPIRED")
     }
+    /** Last car.basic.driving_ready_state seen as off/on; null until the first reading. */
+    @Volatile private var lastReadyStateOff: Boolean? = null
     /** Saved acknowledgements read back once; null until loaded. */
     private var savedDismissals: List<ClusterWarningPolicy.SavedDismissal>? = null
     private var savedDismissalsSameBoot = false
@@ -1677,6 +1679,11 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
 
     private fun setupDataListeners() {
         if (dataChangedListener != null) return
+        // Baseline, so the first power-on after the projector starts is recognised as a transition.
+        lastReadyStateOff =
+                ServiceManager.getInstance()
+                        .getData(CarConstants.CAR_BASIC_DRIVING_READY_STATE.value)
+                        ?.let { ServiceManager.isVehicleReadyStateOff(it) }
         val listener = IDataChanged { key, value ->
             if (value != null) {
                 handleDataChanged(key, value)
@@ -1707,6 +1714,16 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
                         )
                 )
                 lastTracedAlarmList = value
+            }
+
+            // The car re-shows its standing warnings at every power-on, soft ones included, so
+            // acknowledgements made before it switched off must not carry over.
+            // See ClusterWarningPolicy.isPowerOn.
+            if (key == CarConstants.CAR_BASIC_DRIVING_READY_STATE.value) {
+                val isOff = ServiceManager.isVehicleReadyStateOff(value)
+                val powerOn = ClusterWarningPolicy.isPowerOn(lastReadyStateOff, isOff)
+                lastReadyStateOff = isOff
+                if (powerOn) ensureUi { clearAcknowledgements("POWER_ON") }
             }
 
             if (isNativeProjectionPanelKey(key)) {
@@ -2759,6 +2776,22 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
      */
     private fun currentWarningValue(key: String): String? =
             lastWarningValues[key] ?: ServiceManager.getInstance().getData(key)
+
+    /** Forget every acknowledgement, saved ones included, so standing warnings show again. */
+    private fun clearAcknowledgements(reason: String) {
+        val cleared = dismissedCards.toList()
+        dismissedCards.clear()
+        dismissedCardSnapshots.clear()
+        // A restore still pending from before the power-on must not bring them back.
+        savedDismissals = emptyList()
+        dismissalsRestored = true
+        persistDismissals()
+        logClusterPerfEvent(
+                "warning_acks_cleared",
+                mapOf("reason" to reason, "cleared" to cleared.joinToString("|").ifEmpty { "none" })
+        )
+        recomputeWarningState(reason)
+    }
 
     /** Android's boot counter; -1 when unavailable, which restores nothing. */
     private fun currentBootCount(): Int =

@@ -47,6 +47,12 @@ object HudOverlayController {
     private val KEY_CURRENT = CarConstants.CAR_EV_INFO_CUR_CHARGE_CURRENT.value
     private val KEY_RPM = CarConstants.CAR_BASIC_ENGINE_SPEED.value
     private val KEY_SPEED = CarConstants.CAR_BASIC_VEHICLE_SPEED.value
+    /**
+     * The car's own EV power share (signed, regen < 0), as the cluster shows it. The arc used
+     * V x I against a fixed 100 kW and sat at 100 % on the highway while the car showed 60 %
+     * (owner, 2026-10-26). V x I stays the fallback until this arrives.
+     */
+    private val KEY_EV_POWER_PCT = CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value
     /** AR arrow redraw period while near a maneuver (~10 fps). */
     private const val AR_TICK_MS = 100L
     /** Stop extrapolating if Android Auto goes quiet for this long. */
@@ -82,6 +88,7 @@ object HudOverlayController {
     // Written from the CAN callback thread; only quantised changes reach the main thread.
     @Volatile private var voltage = Double.NaN
     @Volatile private var current = Double.NaN
+    @Volatile private var evPowerPercent = Double.NaN
     @Volatile private var rpm = Double.NaN
     @Volatile private var engineOn = false
     /** km/h; drives the AR arrow between Android Auto's ~1 Hz distance updates. */
@@ -107,17 +114,26 @@ object HudOverlayController {
             if (startedAtMs != 0L) return@post
             startedAtMs = SystemClock.elapsedRealtime()
             ServiceManager.getInstance().addDataChangedListener(dataListener)
+            // Not every theme subscribes to it, so ask for it ourselves.
+            ServiceManager.getInstance().ensureKeysMonitored(listOf(KEY_EV_POWER_PCT))
             seedFromCache()
             // First launch once the boot grace is over, even if no data arrives.
             main.postDelayed({ publish() }, BOOT_GRACE_MS)
         }
     }
 
-    /** Telas tab: layout or one of its options changed (already saved). Any thread. */
+    /** Telas tab: style or one of Personalizado's options changed (already saved). Any thread. */
     fun setConfig(config: HudOverlayModel.Config) {
         main.post {
             configCache = config
-            // The owner's pick wins: a debug demo must not keep the HUD up past "original".
+            // The demo started from the settings keeps playing, so each change shows on it at
+            // once (owner, 2026-10-24: compare options live): a change there makes Personalizado,
+            // which the demo now plays. Any other (debug) demo stops: the owner's pick wins.
+            if (demoDriveStartMs != 0L && demoConfig != null) {
+                demoConfig = config
+                publish()
+                return@post
+            }
             endDemo()
             if (wanted()) publish() else closeHosts()
         }
@@ -158,8 +174,8 @@ object HudOverlayController {
         return when {
             // The map demo: the AR theme with the map, whatever the owner picked.
             demoMapStartMs != 0L -> saved.copy(layout = HudOverlayModel.Layout.AR, mapStreets = true)
-            // Scripted drive: the layout chosen in Telas, or AR when started from adb.
-            demoDriveStartMs != 0L -> saved.copy(layout = demoLayout ?: HudOverlayModel.Layout.AR, navigation = true)
+            // Scripted drive: the style open in Telas, or AR when started from adb.
+            demoDriveStartMs != 0L -> (demoConfig ?: saved.copy(layout = HudOverlayModel.Layout.AR)).copy(navigation = true)
             // Static demos draw on "original" too; that layout now draws only the radar.
             demoDirections != null && !saved.active -> saved.copy(layout = HudOverlayModel.Layout.NAVIGATION)
             else -> saved
@@ -207,6 +223,7 @@ object HudOverlayController {
         sm.getData(PowerFlow.KEY_ICE)?.let { onCarData(PowerFlow.KEY_ICE, it) }
         sm.getData(KEY_RPM)?.let { onCarData(KEY_RPM, it) }
         sm.getData(KEY_SPEED)?.let { onCarData(KEY_SPEED, it) }
+        sm.getData(KEY_EV_POWER_PCT)?.let { onCarData(KEY_EV_POWER_PCT, it) }
     }
 
     /** CAN callback thread. Cheap: posts to main only when a shown value (%, 0.1k rpm) changes. */
@@ -215,6 +232,7 @@ object HudOverlayController {
             KEY_VOLTAGE -> voltage = PowerFlowMapper.parseNumber(value)
             KEY_CURRENT -> current = PowerFlowMapper.parseNumber(value)
             KEY_RPM -> rpm = PowerFlowMapper.parseNumber(value)
+            KEY_EV_POWER_PCT -> evPowerPercent = PowerFlowMapper.parseNumber(value).takeIf { it.isFinite() && it in -100.0..100.0 } ?: Double.NaN
             PowerFlow.KEY_ICE -> engineOn = value?.trim() == "1"
             KEY_SPEED -> {
                 // Feeds the AR extrapolation (redraws on its own tick) and the wide arcs (redraw on a change).
@@ -236,9 +254,13 @@ object HudOverlayController {
             }
             else -> return
         }
-        val changed = if (key == KEY_VOLTAGE || key == KEY_CURRENT) {
-            val kw = if (voltage.isFinite() && current.isFinite()) voltage * current / 1000.0 else 0.0
-            val percent = HudOverlayModel.powerPercent(kw)
+        val changed = if (key == KEY_VOLTAGE || key == KEY_CURRENT || key == KEY_EV_POWER_PCT) {
+            val percent = if (evPowerPercent.isFinite()) {
+                evPowerPercent.roundToInt()
+            } else {
+                val kw = if (voltage.isFinite() && current.isFinite()) voltage * current / 1000.0 else 0.0
+                HudOverlayModel.powerPercent(kw)
+            }
             powerPercent.getAndSet(percent) != percent
         } else {
             val tenths = HudOverlayModel.rpmTenths(rpm, engineOn) ?: NO_RPM
@@ -251,6 +273,51 @@ object HudOverlayController {
 
     private fun currentFrame(): HudOverlayModel.Frame {
         trackRoundabout()
+        return buildFrame().also { trace(it) }
+    }
+
+    private var traceAtMs = 0L
+
+    /**
+     * Drive trace (owner, 2026-10-27): once a second while Android Auto navigates on the map,
+     * where the map put the car and what it drew, so a drive can be replayed on the car's own
+     * OSM cache (the 2026-10-27 left turns drawn to the right near the beach couldn't be).
+     */
+    private fun trace(frame: HudOverlayModel.Frame) {
+        val dirs = navDirections ?: return
+        if (!dirs.active || demoDirections != null || demoMapStartMs != 0L || HudMapFeed.poseLat.isNaN()) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - traceAtMs < TRACE_EVERY_MS) return
+        traceAtMs = now
+        val tbt = frame.tbt
+        val route = tbt?.route
+        fun r(v: Double, d: Int) = "%.${d}f".format(java.util.Locale.US, v)
+        fun r(v: Float, d: Int) = r(v.toDouble(), d)
+        val end = route?.takeIf { it.size >= 2 }?.let { "${r(it[it.size - 2], 0)},${r(it[it.size - 1], 0)}" }
+        ClusterPersistentEventLogger.log(
+            "hud_trace",
+            mapOf(
+                "lat" to r(HudMapFeed.poseLat, 6),
+                "lon" to r(HudMapFeed.poseLon, 6),
+                "hdg" to r(HudMapFeed.poseHeading, 0),
+                "gps_hdg" to r(HudMapFeed.gpsBearing, 0),
+                "kmh" to r(HudMapFeed.gpsSpeedMps() * 3.6f, 0),
+                "fix_ms" to HudMapFeed.fixAgeMs(),
+                "turn" to dirs.turn,
+                "aa_m" to dirs.distanceM,
+                "ar_m" to tbt?.arMeters?.let { r(it, 0) },
+                "street" to dirs.street.take(28).replace(' ', '_'),
+                "rb" to dirs.exitNumber?.let { "${it}/${dirs.turnAngle}" },
+                "roads" to HudMapFeed.lines.size,
+                "matched" to tbt?.routeMatched,
+                "clear" to tbt?.routeClear,
+                "pts" to route?.let { it.size / 2 },
+                "end" to end
+            )
+        )
+    }
+
+    private fun buildFrame(): HudOverlayModel.Frame {
         return HudOverlayModel.frameFor(
             config = config(),
             directions = demoDirections ?: navDirections,
@@ -264,6 +331,7 @@ object HudOverlayController {
             streets = HudMapFeed.lines,
             wideArcs = wideArcs,
             mapPending = HudMapFeed.pending,
+            mapProgress = HudMapFeed.progress,
             onRoundabout = rbTracker.entered || roundaboutProgress() > 0f,
             // A demo is a moving drive even with the car parked. Otherwise the real speed:
             // 0 hides the blue approach chevrons.
@@ -271,6 +339,9 @@ object HudOverlayController {
             scriptedDemo = demoDriveStartMs != 0L
         )
     }
+
+    /** [trace] period. */
+    private val TRACE_EVERY_MS = 1_000L
 
     /** Roundabout progress from AA's own countdown to the exit (see [RoundaboutTracker]). */
     private val rbTracker = RoundaboutTracker()
@@ -304,10 +375,10 @@ object HudOverlayController {
 
     /**
      * How far round the ring the left-hand icon is. From AA's countdown once a jump at the entry
-     * says the car is on the ring ([rbTracker]). A real drive often never jumps — the distance
-     * just keeps falling to the exit — so then the icon follows that distance once it is inside
-     * the ring (the demo keeps the jump, it is scripted). Last resort: speed since the distance
-     * reached ~0. 0 before the roundabout or on other maneuvers.
+     * says the car is on the ring ([rbTracker]). Until then AA's distance is to the entry
+     * (drive log 2026-10-22: 100 -> 2 m, then the 157 m lap), so it never counts as the lap.
+     * Without a jump: speed since the distance reached ~0. 0 before the roundabout or on
+     * other maneuvers.
      */
     private fun roundaboutProgress(): Float {
         val dirs = (demoDirections ?: navDirections)?.takeIf { it.active }
@@ -320,10 +391,6 @@ object HudOverlayController {
         // Prefer AA's exit countdown once the entry jump is known — even if this tick's
         // turn_angle was briefly zeroed (telemetry normally holds the approach pair).
         if (rbTracker.entered && meters != null) return rbTracker.progress(meters)
-        if (isRoundabout && travel != null && meters != null && demoDirections == null) {
-            val along = HudArArrow.progressFromExitDistance(meters, travel.toFloat())
-            if (along > 0f) return along
-        }
         val speedFallback = config().layout == HudOverlayModel.Layout.AR && isRoundabout && travel != null
         if (!speedFallback || meters == null || meters > 3f) {
             roundaboutZeroAtMs = 0L
@@ -464,9 +531,27 @@ object HudOverlayController {
      * 4.8 km / 12 min to go. Shows even on the "original" layout, so it ends after [DEMO_TIMEOUT_MS] or as soon
      * as the layout is touched.
      */
-    /** Debug `--es hudMap on|off`: switch the map (saved, as the Telas option does). */
+    /**
+     * Debug `--es hudMap on|off`: the map's streets (off = the 3D arrows it falls back to, no
+     * longer a Telas option), saved into Personalizado.
+     */
     internal fun setMapDebug(on: Boolean) {
-        main.post { HudOverlaySettings.save(config().copy(mapStreets = on, layout = configCache?.layout ?: config().layout)) }
+        main.post { saveCustomDebug { it.copy(mapStreets = on) } }
+    }
+
+    /** Debug `--es hudMapEdges on|off`: the map's streets as edge lines, saved into Personalizado. */
+    internal fun setMapEdgesDebug(on: Boolean) {
+        main.post { saveCustomDebug { it.copy(mapEdges = on) } }
+    }
+
+    /** The shown style (Mapa 3D when it is Original) with [change], saved as Personalizado. */
+    private fun saveCustomDebug(change: (HudOverlayModel.Config) -> HudOverlayModel.Config) {
+        val prefs = HudOverlaySettings.prefs()
+        val preset = HudOverlaySettings.preset(prefs)
+        val base = preset.takeIf { it in HudOverlayModel.Preset.FIXED }
+            ?: HudOverlaySettings.customBase(prefs) ?: HudOverlayModel.Preset.MAP
+        val current = HudOverlaySettings.load(prefs).takeIf { it.active } ?: base.config!!
+        HudOverlaySettings.saveCustom(change(current), base, prefs)
     }
 
     internal fun demo(mode: String) {
@@ -486,7 +571,7 @@ object HudOverlayController {
         stopDemoDrive()
         stopDemoMap()
         if (mode == "drive") {
-            demoLayout = null
+            demoConfig = null
             startDemoDrive()
             return
         }
@@ -567,8 +652,8 @@ object HudOverlayController {
         main.postDelayed(demoMapTick, DEMO_DRIVE_TICK_MS)
     }
 
-    /** Layout the Telas button asked the scripted drive to use. Null keeps the adb default (AR). */
-    private var demoLayout: HudOverlayModel.Layout? = null
+    /** Options the Telas button asked the scripted drive to play. Null keeps the adb default (AR). */
+    private var demoConfig: HudOverlayModel.Config? = null
     private val demoUiListeners = java.util.concurrent.CopyOnWriteArrayList<(Boolean, Boolean) -> Unit>()
 
     /** True while the car's own speed is 0. The scripted demo must not start above that. */
@@ -593,17 +678,17 @@ object HudOverlayController {
     }
 
     /**
-     * Telas: start or stop the scripted drive in [layout]. Start is ignored while the car is moving.
-     * Any thread.
+     * Telas: start or stop the scripted drive with [config] (the style open in the settings).
+     * Start is ignored while the car is moving. Any thread.
      */
-    fun setDemoDrive(on: Boolean, layout: HudOverlayModel.Layout) {
+    fun setDemoDrive(on: Boolean, config: HudOverlayModel.Config) {
         main.post {
             if (on) {
                 if (speedKmh > 0.0) {
                     notifyDemoUi()
                     return@post
                 }
-                demoLayout = layout
+                demoConfig = config
                 stopDemoMap()
                 startDemoDrive()
             } else {
@@ -636,7 +721,7 @@ object HudOverlayController {
         if (demoDriveStartMs == 0L) return
         main.removeCallbacks(demoDriveTick)
         demoDriveStartMs = 0L
-        demoLayout = null
+        demoConfig = null
         demoDirections = null
         notifyDemoUi()
     }

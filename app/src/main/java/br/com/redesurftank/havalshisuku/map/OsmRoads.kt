@@ -11,7 +11,8 @@ import kotlin.math.max
 import kotlin.math.sin
 
 /** A drivable road from OpenStreetMap: its points as lat, lon pairs. */
-class OsmRoad(val id: Long, val name: String, val highway: String, val oneway: Boolean, val latLon: DoubleArray)
+/** [roundabout]: a roundabout's ring (OSM junction=roundabout or circular). */
+class OsmRoad(val id: Long, val name: String, val highway: String, val oneway: Boolean, val latLon: DoubleArray, val roundabout: Boolean = false)
 
 /**
  * OpenStreetMap roads for the AR HUD: fixed tiles, the Overpass query for one, its parser, and
@@ -100,6 +101,7 @@ object OsmRoads {
             val tags = JSONObject().put("highway", r.highway)
             if (r.name.isNotEmpty()) tags.put("name", r.name)
             if (r.oneway) tags.put("oneway", "yes")
+            if (r.roundabout) tags.put("junction", "roundabout")
             elements.put(JSONObject().put("type", "way").put("id", r.id).put("tags", tags).put("geometry", geometry))
         }
         return JSONObject().put(COMPLETE_MARK, true).put("elements", elements).toString()
@@ -126,7 +128,8 @@ object OsmRoads {
                 name = tags?.optString("name").orEmpty(),
                 highway = tags?.optString("highway").orEmpty(),
                 oneway = tags?.optString("oneway") == "yes",
-                latLon = pts
+                latLon = pts,
+                roundabout = tags?.optString("junction").let { it == "roundabout" || it == "circular" }
             )
         }
         return roads
@@ -152,7 +155,9 @@ object OsmRoads {
         val b = bearingDeg * PI / 180
         val sb = sin(b)
         val cb = cos(b)
-        val behindM = 30.0
+        // Behind the car too, off the HUD's bottom: on a roundabout the exit can be back there
+        // (Charitas, 2026-10-26: nearly a U-turn), and the route has to see it.
+        val behindM = 60.0
         val out = ArrayList<LocalRoad>()
         for (road in roads) {
             val width = widthOf(road.highway)
@@ -173,7 +178,7 @@ object OsmRoads {
                         val sx = px + (x - px) * t
                         val sy = py + (y - py) * t
                         if (sy < -behindM || sy > aheadM || abs(sx) > sideM) {
-                            if (run.size >= 4) out += LocalRoad(run.toFloatArray(), width, road.name)
+                            if (run.size >= 4) out += LocalRoad(run.toFloatArray(), width, road.name, road.oneway, road.roundabout)
                             run.clear()
                         } else {
                             run += sx.toFloat(); run += sy.toFloat()
@@ -185,7 +190,7 @@ object OsmRoads {
                 px = x
                 py = y
             }
-            if (run.size >= 4) out += LocalRoad(run.toFloatArray(), width, road.name)
+            if (run.size >= 4) out += LocalRoad(run.toFloatArray(), width, road.name, road.oneway, road.roundabout)
         }
         return out
     }

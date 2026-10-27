@@ -406,24 +406,40 @@ enum class SharedPreferencesKeys(val key: String, val description: String) {
             "aaClusterServiceAutoMount",
             "Montar o Service do mapa do cluster ao ligar"
     ),
-    // Impulse overlay on the physical HUD (display 4096). Layout "original" (default) draws
-    // nothing; "navigation" = AA turn-by-turn + power/RPM bars, each part switchable below
-    // (all on by default). Read through HudOverlaySettings.
-    HUD_LAYOUT("hudLayout", "Layout do HUD"),
+    // Impulse overlay on the physical HUD (display 4096). The style picked in Telas (original,
+    // custom, map, basic, discreet; Original draws nothing). Only "Personalizado" (custom) saves
+    // its options, in the HUD_* keys below; it exists while HUD_CUSTOM_BASE is set. Read through
+    // HudOverlaySettings.
+    HUD_PRESET("hudPreset", "Estilo do HUD (original, custom, map, basic, discreet)"),
+    HUD_CUSTOM_BASE("hudCustomBase", "HUD Personalizado: estilo de origem (map, basic, discreet)"),
+    HUD_LAYOUT("hudLayout", "HUD Personalizado: visual da manobra (navigation = seta, ar = mapa 3D)"),
     HUD_NAV_ENABLED("hudNavEnabled", "HUD: mostrar navegação do Android Auto"),
     HUD_NAV_SMALL_WHEN_FAR("hudNavSmallWhenFar", "HUD: seta menor até faltar 1 km"),
     HUD_NAV_TRIP("hudNavTrip", "HUD: mostrar distância e tempo restantes"),
     HUD_POWER_BAR("hudPowerBar", "HUD: barra de potência/regeneração"),
     HUD_RPM_BAR("hudRpmBar", "HUD: barra de rotação do motor"),
-    HUD_NAV_ARCS("hudNavArcs", "HUD Navegação: potência/rotação em arcos (senão barras)"),
-    HUD_AR_ARCS("hudArArcs", "HUD Navegação AR: potência/rotação em arcos (senão barras)"),
-    // Replace the two above (read as a fallback): none | bars | arcs, per layout.
-    HUD_NAV_GAUGES("hudNavGauges", "HUD Navegação: indicadores de potência/RPM (none, bars, arcs)"),
-    HUD_AR_GAUGES("hudArGauges", "HUD Navegação AR: indicadores de potência/RPM (none, bars, arcs)"),
+    HUD_GAUGES("hudGauges", "HUD: indicadores de potência/RPM (none, bars, arcs)"),
     HUD_AR_CHEVRONS("hudArChevrons", "HUD Navegação AR: setas animadas acima da velocidade perto da curva"),
+    HUD_AR_CHEVRONS_ALWAYS("hudArChevronsAlways", "HUD: uma seta parada junto aos arcos a qualquer distância, para o lado da próxima rua"),
+    HUD_CHEVRONS_EVEN_HIDDEN("hudChevronsEvenHidden", "HUD: a seta de direção parada aparece mesmo com a próxima manobra oculta"),
     HUD_AR_PLACEMENT("hudArPlacement", "HUD Navegação AR: seta no centro (center) ou entre as linhas de faixa (right)"),
     HUD_AR_MAP("hudArMap", "HUD Navegação AR: ruas do OpenStreetMap em cinza (beta)"),
+    HUD_FONT("hudFont", "HUD: fonte do texto (light, regular, condensed)"),
+    HUD_ICON_STYLE("hudIconStyle", "HUD: ícones das manobras (classic, google)"),
+    HUD_AR_MAP_EDGES("hudArMapEdges", "HUD Navegação AR: ruas do mapa só com as bordas (contorno)"),
+    HUD_NAV_SHOW_TURN_FROM_M("hudNavShowTurnFromM", "HUD: mostrar a próxima manobra só a partir de N metros (0 = sempre)"),
+    HUD_COLOR_MODE("hudColorMode", "HUD: cores (colorful = escolhidas, blue = tudo em azul)"),
+    HUD_COLOR_DRIVE("hudColorDrive", "HUD: cor do arco de potência (uso)"),
+    HUD_COLOR_REGEN("hudColorRegen", "HUD: cor do arco de potência (regeneração)"),
+    HUD_COLOR_RPM("hudColorRpm", "HUD: cor do arco de rotação"),
+    HUD_COLOR_STREET("hudColorStreet", "HUD: cor das ruas do mapa"),
+    HUD_COLOR_ROUTE("hudColorRoute", "HUD: cor da rota/seta do mapa"),
+    HUD_COLOR_TEXT("hudColorText", "HUD: cor padrão do texto e ícones"),
+    HUD_COLOR_CHEVRON("hudColorChevron", "HUD: cor da seta de direção (setas perto das curvas)"),
     // Alerta de radar (Recursos). Read through RadarSettings.
+    // The theme's turn-by-turn card (owner, 2026-10-25). Off: the theme gets "no navigation";
+    // the radar and the HUD still read the real directions.
+    CLUSTER_SHOW_NAVIGATION("clusterShowNavigation", "Painel: mostrar a navegação do Android Auto no tema (card de curva a curva)"),
     RADAR_ENABLED("radarEnabled", "Alerta de radar: ativo"),
     RADAR_SHOW_HUD("radarShowHud", "Alerta de radar: mostrar no HUD"),
     RADAR_SHOW_THEME("radarShowTheme", "Alerta de radar: mostrar no tema do cluster"),

@@ -276,6 +276,19 @@ class ClusterWarningPolicyTest {
     }
 
     @Test
+    fun onlyAnOffToOnTransitionCountsAsPowerOn() {
+        // 2026-10-23 08:06: switched back on after a soft power-off.
+        assertTrue(ClusterWarningPolicy.isPowerOn(wasOff = true, isOff = false))
+        // Still on, or still off: nothing to clear.
+        assertFalse(ClusterWarningPolicy.isPowerOn(wasOff = false, isOff = false))
+        assertFalse(ClusterWarningPolicy.isPowerOn(wasOff = true, isOff = true))
+        // Switching off clears nothing; the car re-shows on the way back on.
+        assertFalse(ClusterWarningPolicy.isPowerOn(wasOff = false, isOff = true))
+        // No previous reading: not a transition.
+        assertFalse(ClusterWarningPolicy.isPowerOn(wasOff = null, isOff = false))
+    }
+
+    @Test
     fun dismissLockoutUsesLaterOfKeyOnsetAndBecameTop() {
         // Seatbelt armed at t=0; door rose on top; door cleared at t=4000 and seatbelt
         // became top again. BACK at t=4500 must still see a fresh lockout anchor.

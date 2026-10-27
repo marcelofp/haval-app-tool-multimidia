@@ -147,18 +147,6 @@ class HudOverlayModelTest {
     }
 
     @Test
-    fun `trip joins remaining distance and time like the cluster card`() {
-        assertEquals("4.8 km · 12 min", HudOverlayModel.tripLabel(4_769, 720))
-        assertEquals("850 m", HudOverlayModel.tripLabel(850, null))
-        assertEquals("1.0 km · <1 min", HudOverlayModel.tripLabel(1_000, 30))
-        assertEquals("123 km · 1 h 34 min", HudOverlayModel.tripLabel(123_400, 94 * 60))
-        assertEquals("1.234 km · 2 h", HudOverlayModel.tripLabel(1_234_000, 120 * 60))
-        assertEquals("2 h", HudOverlayModel.tripLabel(null, 120 * 60))
-        assertEquals("", HudOverlayModel.tripLabel(null, null))
-        assertEquals("", HudOverlayModel.tripLabel(-1, -5))
-    }
-
-    @Test
     fun `distance in metres falls back to the display text`() {
         assertEquals(250, HudOverlayModel.distanceMeters("250 m", 250))
         assertEquals(1_200, HudOverlayModel.distanceMeters("1.2 km", null))
@@ -197,7 +185,7 @@ class HudOverlayModelTest {
         assertEquals("TURN_LEFT", full.tbt!!.icon)
         assertEquals("90", full.tbt!!.distanceValue)
         assertEquals("m", full.tbt!!.distanceUnit)
-        assertEquals("4.8 km · 12 min", full.tbt!!.trip)
+        assertEquals("4.8km · 12m", full.tbt!!.trip)
         assertEquals(35, full.powerPercent)
         assertEquals(24, full.rpmTenths)
 
@@ -311,27 +299,21 @@ class HudOverlayModelTest {
     }
 
     @Test
-    fun `far row shows the street and a larger trip line, the others neither`() {
+    fun `far row has no street, a larger trip line higher up`() {
         val far = HudOverlayModel.tbtFor(Directions(active = true, distance = "2.4 km", distanceM = 2_400, turn = "TURN_RIGHT", street = "Av. Brasil"))!!
         assertEquals(HudOverlayModel.TbtStyle.FAR, far.style)
-        assertTrue(HudOverlayModel.showsStreet(far))
-        assertTrue(!HudOverlayModel.showsStreet(far.copy(street = "")))
-        assertTrue(!HudOverlayModel.showsStreet(far.copy(style = HudOverlayModel.TbtStyle.HERO)))
-        assertTrue(!HudOverlayModel.showsStreet(far.copy(style = HudOverlayModel.TbtStyle.COMPACT)))
-        val (farBase, farSize) = HudOverlayModel.tripPlacement(HudOverlayModel.TbtStyle.FAR, hasStreet = true)
-        val (heroBase, heroSize) = HudOverlayModel.tripPlacement(HudOverlayModel.TbtStyle.HERO, hasStreet = false)
+        val (farBase, farSize) = HudOverlayModel.tripPlacement(HudOverlayModel.TbtStyle.FAR)
+        val (heroBase, heroSize) = HudOverlayModel.tripPlacement(HudOverlayModel.TbtStyle.HERO)
         // Far: bigger and higher than with the big arrow; big arrow: bigger than the old 13 px.
         assertTrue(farSize > heroSize && heroSize > 13f)
         assertTrue(farBase < heroBase)
-        assertTrue(HudOverlayModel.tripPlacement(HudOverlayModel.TbtStyle.FAR, hasStreet = false).first < farBase)
     }
 
     @Test
     fun `nav text stays between the arrow row and the bars`() {
         val rowBottom = HudOverlayModel.FAR_TOP + HudOverlayModel.COMPACT_GLYPH
-        // Street cap height (~0.75 em) clears the row; trip clears the street.
-        assertTrue(HudOverlayModel.FAR_STREET_BASELINE - HudOverlayModel.FAR_STREET_SIZE * 0.75f > rowBottom)
-        assertTrue(HudOverlayModel.FAR_TRIP_BASELINE - HudOverlayModel.FAR_TRIP_SIZE * 0.75f > HudOverlayModel.FAR_STREET_BASELINE)
+        // The trip line's cap height (~0.75 em) clears the row.
+        assertTrue(HudOverlayModel.FAR_TRIP_BASELINE - HudOverlayModel.FAR_TRIP_SIZE * 0.75f > rowBottom)
         // Descenders (~0.25 em) stay above the bar row.
         val barTop = HudOverlayModel.BAR_Y - HudOverlayModel.BAR_HEIGHT / 2
         assertTrue(HudOverlayModel.FAR_TRIP_BASELINE + HudOverlayModel.FAR_TRIP_SIZE * 0.25f < barTop)
@@ -344,12 +326,82 @@ class HudOverlayModelTest {
     }
 
     @Test
-    fun `trip line with its flag is centred as one`() {
-        val size = HudOverlayModel.TRIP_SIZE
-        val text = 100f
-        val (flagLeft, textLeft) = HudOverlayModel.tripLineLefts(text, size)
-        val right = textLeft + text
-        assertEquals(HudOverlayModel.BOX_CENTER_X, (flagLeft + right) / 2, 0.01f)
-        assertEquals(size * HudOverlayModel.TRIP_FLAG_SCALE + HudOverlayModel.TRIP_FLAG_GAP, textLeft - flagLeft, 0.01f)
+    fun `left column lines - centred while they fit, else moved left, never past the edge`() {
+        val narrow = 100f
+        assertEquals(HudOverlayModel.BOX_CENTER_X - narrow / 2, HudOverlayModel.columnLeft(narrow, HudOverlayModel.BOX_RIGHT), 0.01f)
+        // Wider than the box: it ends at the right limit, starting further left.
+        val wide = 160f
+        assertEquals(HudOverlayModel.BOX_RIGHT - wide, HudOverlayModel.columnLeft(wide, HudOverlayModel.BOX_RIGHT), 0.01f)
+        assertTrue(HudOverlayModel.columnLeft(400f, HudOverlayModel.BOX_RIGHT) >= HudOverlayModel.TRIP_MIN_LEFT)
+        // A tighter right limit (the arcs) moves a centred line left too.
+        assertTrue(HudOverlayModel.columnLeft(140f, 150f) + 140f <= 150f)
+    }
+
+    @Test
+    fun `trip text - compact, km and h m, short distances in km`() {
+        assertEquals("4.8km · 12m", HudOverlayModel.tripLabel(4_769, 720))
+        assertEquals("0.9km", HudOverlayModel.tripLabel(850, null))
+        assertEquals("1.0km · <1m", HudOverlayModel.tripLabel(1_000, 30))
+        assertEquals("123km · 1h 34m", HudOverlayModel.tripLabel(123_400, 94 * 60))
+        assertEquals("1.234km · 2h", HudOverlayModel.tripLabel(1_234_000, 120 * 60))
+        assertEquals("2h", HudOverlayModel.tripLabel(null, 120 * 60))
+        assertEquals("", HudOverlayModel.tripLabel(null, null))
+        assertEquals("", HudOverlayModel.tripLabel(-1, -5))
+        assertEquals("4.8km" to "12m", HudOverlayModel.tripParts(4_769, 720))
+    }
+
+    @Test
+    fun `show next turn from - hidden further away, trip line stays, 1 km by default`() {
+        val far = Directions(active = true, distance = "650 m", distanceM = 650, turn = "TURN_RIGHT", street = "Av. Paulista", remainingM = 4_800, remainingS = 720)
+        // Default 1 km: shown at 650 m, hidden beyond 1 km.
+        assertEquals(1000, HudOverlayModel.Config().showTurnFromM)
+        assertTrue(!HudOverlayModel.tbtFor(far)!!.turnHidden)
+        assertTrue(HudOverlayModel.tbtFor(far.copy(distance = "1.4 km", distanceM = 1_400))!!.turnHidden)
+        val from500 = HudOverlayModel.Config(layout = HudOverlayModel.Layout.NAVIGATION, showTurnFromM = 500)
+        val hidden = HudOverlayModel.tbtFor(far, from500)!!
+        assertTrue(hidden.turnHidden)
+        assertEquals("4.8km", hidden.tripDistance)
+        assertEquals("12m", hidden.tripTime)
+        assertTrue(hidden.trip.isNotEmpty())
+        // Inside the distance, and an unknown one: shown.
+        assertTrue(!HudOverlayModel.tbtFor(far.copy(distance = "450 m", distanceM = 450), from500)!!.turnHidden)
+        assertTrue(!HudOverlayModel.turnHidden(from500, null))
+        // AR too.
+        val ar = from500.copy(layout = HudOverlayModel.Layout.AR)
+        assertTrue(HudOverlayModel.frameFor(ar, far, 0, null).tbt!!.turnHidden)
+        // Last section: the trip line has the totals while the destination is hidden.
+        val dest = far.copy(turn = "DESTINATION")
+        assertTrue(HudOverlayModel.tbtFor(dest)!!.trip.isEmpty())
+        assertTrue(HudOverlayModel.tbtFor(dest, from500)!!.trip.isNotEmpty())
+        assertEquals(listOf(0, 200, 300, 500, 1000), HudOverlayModel.SHOW_TURN_FROM_OPTIONS)
+    }
+
+    @Test
+    fun `map edge lines option reaches the AR map frame`() {
+        val ar = HudOverlayModel.Config(layout = HudOverlayModel.Layout.AR, mapStreets = true, mapEdges = true)
+        val d = Directions(active = true, distance = "100 m", distanceM = 100, turn = "TURN_RIGHT")
+        assertTrue(HudOverlayModel.frameFor(ar, d, 0, null).tbt!!.mapEdges)
+        assertTrue(!HudOverlayModel.frameFor(ar.copy(mapEdges = false), d, 0, null).tbt!!.mapEdges)
+    }
+
+    @Test
+    fun `Google icons - ramps and either U-turn, sharp as turn, fork as slight plus straight on, destination keeps the flag`() {
+        val m = mapOf(
+            "TURN_RIGHT" to "turn_right", "TURN_LEFT" to "turn_left", "SHARP_RIGHT" to "turn_right",
+            "SLIGHT_LEFT" to "turn_slight_left", "KEEP_RIGHT" to "turn_slight_right", "FORK_LEFT" to "fork_left",
+            "OFF_RAMP_RIGHT" to "ramp_right", "ON_RAMP_LEFT" to "ramp_left", "U_TURN_RIGHT" to "u_turn_right",
+            "U_TURN_LEFT" to "u_turn_left", "MERGE" to "merge", "MERGE_LEFT" to "merge", "STRAIGHT" to "straight",
+            "NAME_CHANGE" to "straight", "ROUNDABOUT" to "roundabout_right"
+        )
+        for ((t, g) in m) assertEquals(t, g, HudOverlayModel.googleIcon(t))
+        assertEquals("roundabout_left", HudOverlayModel.googleIcon("ROUNDABOUT", clockwise = true))
+        assertNull(HudOverlayModel.googleIcon("DESTINATION_RIGHT"))
+        assertNull(HudOverlayModel.googleIcon(""))
+        // Only with the Google style on; the logic icon stays ours either way.
+        val d = Directions(active = true, distance = "150 m", distanceM = 150, turn = "SHARP_LEFT")
+        assertNull(HudOverlayModel.tbtFor(d)!!.googleIcon)
+        val g = HudOverlayModel.tbtFor(d, HudOverlayModel.Config(iconStyle = HudOverlayModel.IconStyle.GOOGLE))!!
+        assertEquals("turn_left", g.googleIcon)
+        assertEquals("TURN_LEFT", g.icon)
     }
 }

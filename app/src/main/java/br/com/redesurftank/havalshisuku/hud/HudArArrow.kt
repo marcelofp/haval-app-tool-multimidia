@@ -148,6 +148,11 @@ object HudArArrow {
     const val MAP_FAR_M = 700f
     /** Screen row of the car (0 m ahead). Above [BOTTOM], so the road isn't cut by the optics' edge. */
     const val MAP_NEAR_Y = 184f
+    /** A street is under the route when this many of its points share the route's grid cells (metres). */
+    const val MAP_ON_ROUTE_M = 3f
+    const val MAP_ON_ROUTE_PTS = 5
+    /** The route drawn this far behind the car: past the HUD's bottom (y 200 is ~11 m back), like the roads. */
+    const val MAP_BEHIND_M = 12f
     /**
      * Depth scale (metres): distance is spread logarithmically between the bottom edge (the car)
      * and the horizon, so the far path stays readable. True perspective with a road-wide route
@@ -160,13 +165,13 @@ object HudArArrow {
     const val MAP_HALF_M = 5f
     const val MAP_HEAD_L_M = 14f
     const val MAP_HEAD_HALF_M = 10f
-    const val MAP_FLAG_GAP_M = 3f
+    const val MAP_FLAG_GAP_M = 1f
     const val MAP_FLAG_H_M = 6f
     /**
      * The pole stays at least this far (px) outside the drawn road or arrow head. A metre offset
      * alone collapses into the centre of a road that has been widened to [MAP_MIN_PX].
      */
-    const val MAP_FLAG_GAP_PX = 12f
+    const val MAP_FLAG_GAP_PX = 4f
     /**
      * Minimum drawn thickness (px) of a street: one running sideways in the distance spans only a
      * few metres of depth and would shrink to a hairline (the turn street included).
@@ -276,9 +281,39 @@ object HudArArrow {
         val rawRoute = metres(route)
         val align = egoAlign(rawRoute)
         fun W.placed() = align?.let { ego(it) } ?: this
+        val ahead = rawRoute.map { it.placed() }.filter { it.z <= MAP_FAR_M }
+        // The streets the route runs on are drawn as wide as the blue (owner, 2026-10-27: an
+        // avenue showed wider than the route, a ramp narrower); the others keep their class.
+        // A street is under the route when [MAP_ON_ROUTE_PTS] of its points (~20 m) lie on it, so
+        // a cross street (a few points) keeps its own width. Looked up in a grid of the route.
+        val cells = HashSet<Long>()
+        fun cell(x: Float, z: Float) = (Math.floorDiv(x.toInt(), MAP_ON_ROUTE_M.toInt()).toLong() shl 32) xor
+            (Math.floorDiv(z.toInt(), MAP_ON_ROUTE_M.toInt()).toLong() and 0xffffffffL)
+        // The route every ~1 m, each cell and its neighbours: ~3-6 m either side of it.
+        for (i in 0 until ahead.size - 1) {
+            val a0 = ahead[i]
+            val a1 = ahead[i + 1]
+            val n = maxOf(1, hypot(a1.x - a0.x, a1.z - a0.z).toInt())
+            for (k in 0..n) {
+                val x = a0.x + (a1.x - a0.x) * k / n
+                val z = a0.z + (a1.z - a0.z) * k / n
+                for (dx in -1..1) for (dz in -1..1) cells += cell(x + dx * MAP_ON_ROUTE_M, z + dz * MAP_ON_ROUTE_M)
+            }
+        }
         val gray = ArrayList<List<Pt>>()
-        for (road in roads) gray += mapRibbon(metres(road.pts).map { it.placed() }, MAP_HALF_M * road.width, MAP_MIN_PX * road.width, horizon)
-        val line = rawRoute.map { it.placed() }.filter { it.z <= MAP_FAR_M }
+        for (road in roads) {
+            val pts = metres(road.pts).map { it.placed() }
+            val under = pts.count { cell(it.x, it.z) in cells } >= MAP_ON_ROUTE_PTS
+            val w = if (under) 1f else road.width
+            gray += mapRibbon(pts, MAP_HALF_M * w, MAP_MIN_PX * w, horizon)
+        }
+        // The route starts at the car, [MAP_NEAR_Y] above the HUD's bottom, while the grey roads
+        // run on behind it to the edge: carry it back [MAP_BEHIND_M] the way it starts, so both
+        // reach the bottom and fade there together (owner, 2026-10-26).
+        val line = if (ahead.size >= 2) {
+            val d = unit(ahead[0], ahead[1])
+            listOf(W(ahead[0].x - d.x * MAP_BEHIND_M, ahead[0].z - d.z * MAP_BEHIND_M)) + ahead
+        } else ahead
         val blue = mapRibbon(line, MAP_HALF_M, MAP_MIN_PX, horizon).lastOrNull().orEmpty()
         var head = FloatArray(0)
         var flag: Flag? = null
@@ -288,13 +323,18 @@ object HudArArrow {
             val tip = mapProject(end.x + d.x * MAP_HEAD_L_M, end.z + d.z * MAP_HEAD_L_M, horizon)
             val l = mapProject(end.x - d.z * MAP_HEAD_HALF_M, end.z + d.x * MAP_HEAD_HALF_M, horizon)
             val r = mapProject(end.x + d.z * MAP_HEAD_HALF_M, end.z - d.x * MAP_HEAD_HALF_M, horizon)
-            if (tip != null && l != null && r != null) head = floatArrayOf(tip.first, tip.second, l.first, l.second, r.first, r.second)
+            // Arriving: no head (owner, 2026-10-25), the route ends at the flag.
+            if (destSide == null && tip != null && l != null && r != null) head = floatArrayOf(tip.first, tip.second, l.first, l.second, r.first, r.second)
             if (destSide != null) {
                 val height = MAP_FLAG_H_M * mapPxPerM(end.z, horizon)
                 flag = if (destSide == 0) {
                     // Side not in the maneuver: just past the head, on the road.
                     val ahead = MAP_HEAD_L_M + 4f
                     mapProject(end.x + d.x * ahead, end.z + d.z * ahead, horizon)?.let { (fx, fy) -> Flag(fx, fy, height) }
+                } else if (blue.isNotEmpty()) {
+                    // At the drawn road's own edge (there is no head to clear any more).
+                    val e = blue.last()
+                    flagBeside(e.lx to e.ly, e.rx to e.ry, null, destSide, end.z, horizon, height)
                 } else if (l != null && r != null) {
                     // Same side as the arrow ([destination]): outside the head and the drawn road.
                     // A metre offset sits inside the head (it is wider than the street) and, far
@@ -354,11 +394,14 @@ object HudArArrow {
      */
     data class Flag(val x: Float, val y: Float, val height: Float, val pennant: Int = 1)
 
-    /** Side of the destination for a maneuver token: -1 left, +1 right, 0 unknown, null not one. */
+    /**
+     * Side of the destination for a maneuver token: -1 left, +1 right, null not one. AA's plain
+     * DESTINATION (drive log: maneuver 39, no side) goes on the right curb, where a car stops
+     * in right-hand traffic, instead of in the middle of the road (owner).
+     */
     fun destinationSide(turn: String?): Int? = when (turn.orEmpty().uppercase()) {
         "DESTINATION_LEFT" -> -1
-        "DESTINATION_RIGHT" -> 1
-        "DESTINATION" -> 0
+        "DESTINATION_RIGHT", "DESTINATION" -> 1
         else -> null
     }
 
@@ -558,11 +601,12 @@ object HudArArrow {
         }
         line += W(0f, zc)
         val blue = ribbon(line, HW, AHEAD).lastOrNull().orEmpty()
-        // Outside the head, which is wider than the ribbon; side 0 stays on the road past the head.
-        val fx = if (side == 0) 0f else side * (max(HW, HEAD_HW) + FLAG_GAP)
-        val fz = if (side == 0) zc + HEAD_L + 0.6f else zc
+        // No head on the last stretch (owner, 2026-10-25): the route ends at the flag, which
+        // stands at the road's edge; side 0 stays on the road just past the end.
+        val fx = if (side == 0) 0f else side * (HW + FLAG_GAP)
+        val fz = if (side == 0) zc + 0.6f else zc
         val (sx, sy) = project(fx, fz)
-        return fit(Shape(blue, head(line, AHEAD), flag = Flag(sx, sy, FLAG_H * F_X / fz, pennant = if (side < 0) -1 else 1)), placement)
+        return fit(Shape(blue, FloatArray(0), flag = Flag(sx, sy, FLAG_H * F_X / fz, pennant = if (side < 0) -1 else 1)), placement)
     }
 
     /** Cubic from [p0] heading [d0] to [p3] heading [d3], without [p0]. */
@@ -693,14 +737,4 @@ object HudArArrow {
     /** Way round to an exit [travelDeg] along a ring of [RB_RADIUS_M]. */
     fun ringLengthM(travelDeg: Float): Float = (travelDeg * PI / 180).toFloat() * RB_RADIUS_M
 
-    /**
-     * Progress when AA's distance is already the metres left to the exit and never jumps at the
-     * entry. 0 while that distance is still longer than the ring (still approaching); then
-     * 1 - left / ring, so the icon closes as the exit gets nearer.
-     */
-    fun progressFromExitDistance(metersLeft: Float, travelDeg: Float): Float {
-        val way = ringLengthM(travelDeg)
-        if (way <= 0f || metersLeft >= way) return 0f
-        return (1f - metersLeft / way).coerceIn(0f, 1f)
-    }
 }

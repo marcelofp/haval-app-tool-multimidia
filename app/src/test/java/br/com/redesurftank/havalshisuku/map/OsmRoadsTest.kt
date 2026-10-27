@@ -2,6 +2,7 @@ package br.com.redesurftank.havalshisuku.map
 
 import br.com.redesurftank.havalshisuku.hud.HudArArrow
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -147,6 +148,114 @@ class OsmRoadsTest {
         )
     }
 
+    /** A ring of radius 15 at y 115 entered from below at (0, 100), exits right, ahead and left. */
+    private fun ring(): List<LocalRoad> {
+        fun road(vararg xy: Float) = LocalRoad(xy, 1f)
+        val pts = ArrayList<Float>()
+        for (k in 0..24) {
+            val th = Math.toRadians(-90.0 + 15.0 * k)
+            pts += (15 * kotlin.math.cos(th)).toFloat(); pts += (115 + 15 * kotlin.math.sin(th)).toFloat()
+        }
+        return listOf(
+            road(0f, -30f, 0f, 100f),
+            LocalRoad(pts.toFloatArray(), 1f),
+            road(15f, 115f, 140f, 115f),   // right (90 deg round a counter-clockwise ring)
+            road(0f, 130f, 0f, 260f),      // ahead (180)
+            road(-15f, 115f, -140f, 115f)  // left (270)
+        )
+    }
+
+    @Test
+    fun `roundabout - round the ring in the direction of travel and out of AA's exit`() {
+        val ahead = RoutePath.roundabout(ring(), 100f, 180f, clockwise = false)!!
+        val n = ahead.pts.size / 2
+        assertEquals(0f, ahead.pts[2 * n - 2], 1f)
+        assertTrue(ahead.pts[2 * n - 1] > 200f)
+        // Counter-clockwise (right-hand traffic): round the right-hand side to get there.
+        assertTrue((0 until n).any { ahead.pts[2 * it] > 10f })
+        assertTrue((0 until n).none { ahead.pts[2 * it] < -10f && ahead.pts[2 * it + 1] in 100f..130f })
+        val right = RoutePath.roundabout(ring(), 100f, 90f, clockwise = false)!!
+        assertTrue(right.pts[right.pts.size - 2] > 100f)
+        val left = RoutePath.roundabout(ring(), 100f, 270f, clockwise = false)!!
+        assertTrue(left.pts[left.pts.size - 2] < -100f)
+        // Clockwise: the left exit is the first, reached round the left-hand side.
+        val cwLeft = RoutePath.roundabout(ring(), 100f, 90f, clockwise = true)!!
+        assertTrue(cwLeft.pts[cwLeft.pts.size - 2] < -100f)
+        // No ring there: null (the plain route is used).
+        assertNull(RoutePath.roundabout(listOf(LocalRoad(floatArrayOf(0f, -30f, 0f, 300f), 1f)), 100f, 180f, false))
+    }
+
+    @Test
+    fun `roundabout - AA's exit number, the last exit past the map's count, roads that only come in skipped`() {
+        // Exits counter-clockwise: right (1st), ahead (2nd), left (3rd).
+        val second = RoutePath.roundabout(ring(), 100f, 180f, clockwise = false, exitNumber = 2)!!
+        assertEquals(0f, second.pts[second.pts.size - 2], 1f)
+        // Charitas, 2026-10-26: AA's number past the map's exits (and its angle off): the last one.
+        val past = RoutePath.roundabout(ring(), 100f, 90f, clockwise = false, exitNumber = 9)!!
+        assertTrue(past.pts[past.pts.size - 2] < -100f)
+        // The right-hand road only comes into the ring: not an exit, so the 1st exit is ahead.
+        val roads = ring().toMutableList().also { it[2] = LocalRoad(floatArrayOf(140f, 115f, 15f, 115f), 1f, oneway = true) }
+        val first = RoutePath.roundabout(roads, 100f, 180f, clockwise = false, exitNumber = 1)!!
+        assertEquals(0f, first.pts[first.pts.size - 2], 1f)
+        assertTrue((0 until first.pts.size / 2).none { first.pts[2 * it] > 30f })
+    }
+
+    @Test
+    fun `on the ring - out of the exit at AA's distance round it`() {
+        // A counter-clockwise ring with the car on it heading ahead (centre 15 m to the left).
+        val pts = ArrayList<Float>()
+        for (k in 0..24) {
+            val th = Math.toRadians(15.0 * k)
+            pts += (-15 + 15 * kotlin.math.cos(th)).toFloat(); pts += (15 * kotlin.math.sin(th)).toFloat()
+        }
+        val roads = listOf(
+            LocalRoad(pts.toFloatArray(), 1f, ring = true),
+            LocalRoad(floatArrayOf(-15f, 15f, -15f, 140f), 1f),   // a quarter round (~24 m)
+            LocalRoad(floatArrayOf(-30f, 0f, -150f, 0f), 1f)      // half round (~47 m)
+        )
+        val top = RoutePath.onRing(roads, 24f, clockwise = false)!!
+        assertEquals(-15f, top.pts[top.pts.size - 2], 1f)
+        assertTrue(top.pts[top.pts.size - 1] > 100f)
+        val left = RoutePath.onRing(roads, 47f, clockwise = false)!!
+        assertTrue(left.pts[left.pts.size - 2] < -100f)
+        // Nothing near AA's distance: null (the plain route is used).
+        assertNull(RoutePath.onRing(roads, 200f, clockwise = false))
+    }
+
+    @Test
+    fun `route - never out into a one-way street against its traffic`() {
+        val roads = listOf(
+            LocalRoad(floatArrayOf(0f, -30f, 0f, 100f, 0f, 300f), 1f),
+            LocalRoad(floatArrayOf(120f, 100f, 0f, 100f), 1f, oneway = true) // comes in from the right
+        )
+        val r = RoutePath.route(roads, 100f, 90f)!!
+        assertTrue((0 until r.pts.size / 2).none { kotlin.math.abs(r.pts[2 * it + 1] - 100f) < 1f && r.pts[2 * it] > 60f })
+        // The same street two-way: taken.
+        val two = RoutePath.route(listOf(roads[0], LocalRoad(floatArrayOf(120f, 100f, 0f, 100f), 1f)), 100f, 90f)!!
+        assertEquals(120f, two.pts[two.pts.size - 2], 1f)
+    }
+
+    @Test
+    fun `route - after the turn, the tail stops at the next junction (the way on is unknown)`() {
+        fun road(vararg xy: Float, w: Float = 1f) = LocalRoad(xy, w)
+        // Right at 100 m onto a street with a cross street 11 m in (Lorde Byron, 2026-10-25).
+        val roads = listOf(
+            road(0f, -30f, 0f, 100f, 0f, 300f),
+            road(0f, 100f, 11f, 100f, 120f, 100f),
+            road(11f, 40f, 11f, 100f, 11f, 160f)
+        )
+        val r = RoutePath.route(roads, 100f, 90f)!!
+        val n = r.pts.size / 2
+        assertEquals(11f, r.pts[2 * n - 2], 0.5f)
+        assertEquals(100f, r.pts[2 * n - 1], 0.5f)
+        // No junction after it: the street is followed on as before.
+        val open = RoutePath.route(roads.take(2), 100f, 90f)!!
+        assertTrue(open.pts[open.pts.size - 2] > 100f)
+        // A driveway isn't a junction.
+        val drive = RoutePath.route(listOf(roads[0], roads[1], road(11f, 100f, 11f, 140f, w = 0.55f)), 100f, 90f)!!
+        assertTrue(drive.pts[drive.pts.size - 2] > 100f)
+    }
+
     @Test
     fun `route - the road under the car to AA's distance, then the matching street`() {
         val r = RoutePath.route(grid(), 200f, 90f)!!
@@ -206,20 +315,21 @@ class OsmRoadsTest {
         val (x1, y1) = HudArArrow.mapProject(5f, 50f)!!
         val (x2, y2) = HudArArrow.mapProject(5f, 300f)!!
         assertEquals((x1 - HudArArrow.CX) / (y1 - HudArArrow.MAP_HORIZON_Y), (x2 - HudArArrow.CX) / (y2 - HudArArrow.MAP_HORIZON_Y), 0.001f)
-        // Arriving on the right: the pole is outside the arrow head and the drawn street, not in
-        // the middle of either (the head is wider than the street; far away the street is widened).
+        // Arriving on the right: no head (the route ends at the flag), and the pole is outside the
+        // drawn street, not in its middle (far away the street is widened).
         val arrive = RoutePath.route(roads, 250f, 0f)!!
         val sceneR = HudArArrow.mapScene(roads, arrive.pts, 1)
         val flag = sceneR.flag!!
-        assertTrue(flag.x > maxOf(sceneR.head[4], sceneR.blue.last().rx))
+        assertTrue(sceneR.head.isEmpty())
+        assertTrue(flag.x > sceneR.blue.last().rx)
         assertEquals(1, flag.pennant)
         val sceneL = HudArArrow.mapScene(roads, arrive.pts, -1)
         val left = sceneL.flag!!
-        assertTrue(left.x < minOf(sceneL.head[2], sceneL.blue.last().lx))
+        assertTrue(left.x < sceneL.blue.last().lx)
         assertEquals(-1, left.pennant)
         val farRoad = listOf(LocalRoad(floatArrayOf(0f, -20f, 0f, 650f), 1f))
         val farRoute = RoutePath.route(farRoad, 550f, 0f)!!
         val far = HudArArrow.mapScene(farRoad, farRoute.pts, 1, HudArArrow.MAP_HORIZON_TOP_Y)
-        assertTrue(far.flag!!.x > maxOf(far.head[4], far.blue.last().rx))
+        assertTrue(far.flag!!.x > far.blue.last().rx)
     }
 }
