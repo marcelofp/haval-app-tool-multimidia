@@ -134,15 +134,15 @@ object CarPlayNavigationCapture {
                     startedAtMs = SystemClock.elapsedRealtime()
                     view = view.copy(startedAtMs = startedAtMs)
                     if (enableHudImmediately) {
-                        CarPlayCleanMapCoordinator.setExperimentEnabled(true)
                         clusterCaptureLease = ClusterPersistentEventLogger.acquireCaptureLease("carplay-combined-$id")
                         ClusterPersistentEventLogger.log(
                             "carplay_combined_test_start",
                             mapOf("session" to id, "durationMs" to maxDurationMs, "versionCode" to BuildConfig.VERSION_CODE)
                         )
+                        CarPlayCleanMapCoordinator.setExperimentEnabled(true, startedAtMs + maxDurationMs)
                     }
                     CarPlayExperimentalHud.start(context)
-                    CarPlayExperimentalHud.begin(id, enableHudImmediately)
+                    CarPlayExperimentalHud.begin(id, enableHudImmediately, startedAtMs + maxDurationMs)
                     if (!record("capture_start", JSONObject().put("versionCode", BuildConfig.VERSION_CODE)
                         .put("versionName", BuildConfig.VERSION_NAME)
                         .put("mode", if (enableHudImmediately) "five_minute_combined_test" else "diagnostic_only")

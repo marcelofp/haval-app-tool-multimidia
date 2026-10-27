@@ -34,4 +34,23 @@ public class CarPlayClusterHostPolicyTest {
             assertFalse(CarPlayClusterHostPolicy.allows(snapshot(1000, display, -1), 1000));
         }
     }
+
+    @Test public void themeDemandAloneDoesNotOverrideFreshExplicitAndroidAutoAbsence() {
+        CarPlayClusterHostPolicy.Snapshot explicitInactive = new CarPlayClusterHostPolicy.Snapshot(
+            1000, 3, true, true, true, true, true, true, true, false, true);
+        assertTrue(CarPlayClusterHostPolicy.allows(explicitInactive, 1000));
+        CarPlayClusterHostPolicy.Snapshot unknown = new CarPlayClusterHostPolicy.Snapshot(
+            1000, 3, true, true, false, true, true, true, true, false, true);
+        assertEquals(CarPlayClusterHostPolicy.Reason.AA_NOT_KNOWN_INACTIVE,
+            CarPlayClusterHostPolicy.reason(unknown, 1000));
+    }
+
+    @Test public void unknownTaskEvidenceAndSecondaryCarPlayHaveDistinctReasons() {
+        assertEquals(CarPlayClusterHostPolicy.Reason.TASK_OBSERVATION_UNKNOWN,
+            CarPlayClusterHostPolicy.reason(new CarPlayClusterHostPolicy.Snapshot(
+                1000, 3, true, true, true, true, true, true, false, false, false), 1000));
+        assertEquals(CarPlayClusterHostPolicy.Reason.CARPLAY_SECONDARY_PRESENT,
+            CarPlayClusterHostPolicy.reason(new CarPlayClusterHostPolicy.Snapshot(
+                1000, 3, true, true, true, true, true, true, true, true, false), 1000));
+    }
 }

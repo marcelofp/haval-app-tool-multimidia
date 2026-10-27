@@ -23,7 +23,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import br.com.redesurftank.havalshisuku.ui.components.AppColors
+import br.com.redesurftank.havalshisuku.ui.components.CarPlayBridgeBootstrapSection
 import br.com.redesurftank.havalshisuku.ui.components.StyledCard
+import br.com.redesurftank.havalshisuku.experimental.CarPlayCleanMapCoordinator
 import kotlinx.coroutines.delay
 
 @Composable
@@ -46,7 +48,8 @@ fun CarPlayCaptureScreen(onBackToFeatures: () -> Unit) {
         OutlinedButton(onClick = onBackToFeatures) { Text("Voltar aos recursos") }
         Text("Teste CarPlay · captura + HUD", color = AppColors.TextPrimary,
             fontSize = 26.sp, fontWeight = FontWeight.Bold)
-        Text("Um toque prepara toda a captura. Depois conecte o CarPlay e faça uma rota no Apple Maps ou Waze.",
+        CarPlayBridgeBootstrapSection()
+        Text("Conecte o CarPlay e inicie uma rota. Depois de iniciar o teste aqui, volte para a tela do CarPlay na central.",
             color = AppColors.TextSecondary, fontSize = 18.sp)
         StyledCard {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -68,8 +71,9 @@ fun CarPlayCaptureScreen(onBackToFeatures: () -> Unit) {
                 Text("• captura dos callbacks de navegação do CarPlay\n" +
                     "• distância e nome da via no HUD nativo, quando disponíveis\n" +
                     "• captura correlacionada dos eventos do cluster durante os mesmos 5 minutos\n\n" +
-                    "A seta continua vazia enquanto os códigos de manobra não forem confirmados. Esta 129 não ativa nem simula o mapa limpo: " +
-                    "os logs servirão para construir e validar a próxima etapa da ponte do cluster.",
+                    "A seta continua vazia enquanto os códigos de manobra não forem confirmados. " +
+                    "Com o CarPlay preparado, o teste também permite validar o mapa experimental no cluster. " +
+                    "A confirmação depende da imagem real no painel, além dos registros do teste.",
                     color = AppColors.TextSecondary)
             }
         }
@@ -80,8 +84,9 @@ fun CarPlayCaptureScreen(onBackToFeatures: () -> Unit) {
                 Text("Callbacks: ${status.callbacks} · Erros: ${status.errors} · Descartados: ${status.dropped}", color = AppColors.TextSecondary)
                 Text("Nulos: ${status.summary.empty} · Sem rota elegível: ${status.summary.inactive}", color = AppColors.TextSecondary)
                 Text("Potencialmente úteis: ${status.summary.candidates} · Não confirmados: ${status.summary.unconfirmed}", color = AppColors.TextSecondary)
-                Text("HUD: ${if (CarPlayExperimentalHud.enabled) "ativo" else "inativo"}. Serviço conectado ou callback recebido não garante mapa limpo.",
+                Text("HUD: ${CarPlayExperimentalHud.decisionMessage}",
                     color = AppColors.TextSecondary)
+                Text("Mapa experimental: ${CarPlayCleanMapCoordinator.statusMessage}", color = AppColors.TextSecondary)
                 val end = if (status.running) now else status.stoppedAtMs
                 val duration = if (status.startedAtMs == 0L) 0L else ((end - status.startedAtMs).coerceAtLeast(0L) / 1_000L)
                 Text("Duração: ${duration / 60}min ${duration % 60}s", color = AppColors.TextSecondary)

@@ -25,10 +25,18 @@ before starting/after ending the phone route; marker times reflect user actions,
 automatically detected route transitions. No export/network endpoint, publisher, OEM
 patch, video/Surface/focus operation or automatic retry of a silent live binding is added.
 
-Next test: capture Apple Maps separately before creating the route, then compare an
-equivalent Waze session. 74125 can already collect the same raw navigation fields; 74126
-improves observability only. Installed OEM APK hashes differ from the static reference;
-this alone does not establish protocol incompatibility or explain inactive payloads.
+Follow-up Apple Maps vehicle session: 197.647 seconds, 204 records, 177 callbacks,
+zero reported errors/drops and a manual stop. Raw states: 0 (8), 1 (158), 3 (4),
+5 (2), 6 (5). State-1 maneuvers: 2 (120), 1 (6), 29 (22), 47 (10), with nonempty
+roads and distance strings, median interval 1000 ms. A maneuver 11 also appeared
+in preparation states. This confirms route data delivery for Apple Maps, not map video
+or validated arrow/ETA semantics. The device recorded 74124 in both sessions.
+Transient 1/5/0/3/1 transitions occurred; state 0 is not proof of phone disconnection.
+The app and connection/start ordering differed between the Waze and Apple Maps tests,
+so application-only causality is not established. Next compare Waze under the same
+capture-before-connection/route sequence. 74125 can collect the same raw fields; 74126
+improves observability only. Installed OEM hashes differ from the static reference,
+but this did not prevent Apple Maps delivery and does not explain Waze's inactive data.
 
 ## Scope and provenance
 

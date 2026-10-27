@@ -45,6 +45,57 @@ native installation. The UI and Surface retirement remain bounded and reversible
 
 ## Evidence status
 
+### Attended bootstrap succeeded, 2026-10-25
+
+The corrected cold path reached `installed-pinned` with all nine original
+passthrough trampolines retained in the live OEM process. The separate ESM Java
+agent then reported `loaded` and `armed`. The owner reconnected the iPhone and
+confirmed normal principal CarPlay on the central display.
+
+The Android 9 linker reentry abort was removed by installing at the attested
+internal loader completion boundary under its caller's recursive mutex. Actual
+Gum-owned trampolines were cloaked; their executable pages are now checked with
+`Memory.queryProtection()` after code commit. The endpoint package also now
+declares ESM explicitly: the prior CommonJS entry threw before Java import.
+
+The final source checkpoint is `e55014b1` on the personal 74132 release branch.
+54 interceptor scenarios, 48 Python passes (one optional test skipped), the full
+regression guard and the unchanged Android/native inputs' Mini Debug build pass.
+The production 74132 APK and native bridge image are unchanged; the correction
+is in the separately staged launcher, controller and Java agent packaging.
+
+Keep the successful native injector and Java control agent alive for the OEM
+process lifetime. A vehicle/process restart requires a fresh coordinated cold
+preparation; the temporary startup gate has already been cleared. The old
+CommonJS endpoint never initialized its receiver, so the corrected ESM agent was
+loaded without replacing the live native process.
+
+This proves bootstrap and principal preservation. Binder offering, Surface
+activation, type-111 acceptance and first display-3 frame still require the
+explicit five-minute test; do not report the clean map as working yet.
+
+### Offline endpoint preparation, 2026-10-24
+
+The OEM control agent now includes its Java dependency explicitly through the
+[pinned agent build](../../scripts/carplay-native-analysis/agent/README.md).
+Its full Frida archive is staged byte-for-byte only after the source/lock/artifact
+manifest checks. It does not depend on the REPL providing a global Java bridge.
+
+Portable tests reproduced a dropped offer when a legitimate Java callback arrived
+through a different JavaScript wrapper. Callbacks now use an opaque binding-attempt
+identity. Teardown closes pending endpoints as well as offered ones, stale
+disconnects cannot retire a newer request, and principal generation is checked
+again before offering. This protects the existing isolation/lifecycle contract;
+it adds no Activity launch, display change, native-panel action or AA operation.
+
+The new tests establish model behavior and offline bundling only. The corrected
+namespace bridge and complete agent still require coordinated parked Android
+passthrough, Binder authentication, Surface retirement and first-frame evidence.
+The central was offline during the final retrieval window; no new installation
+or runtime activation was attempted in this offline preparation session.
+
+### Prior checkpoint
+
 Portable entry/dispatch tests pass under ASan/UBSan, and the OEM control script
 passes JavaScript syntax validation. Commit `81923701` passed the authorized Mac
 Mini ARM64/JNI/AIDL/Kotlin/Java build and full Debug JVM suite in 2m01s. The linked

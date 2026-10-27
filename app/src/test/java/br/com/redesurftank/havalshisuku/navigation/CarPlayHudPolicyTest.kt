@@ -14,6 +14,7 @@ class CarPlayHudPolicyTest {
         connect("capture", 1)
         setEnabled(true)
         onAndroidAutoAvailability(false, 100)
+        onPassiveAndroidAutoAvailability(false, 100)
     }
 
     @Test fun defaultIsDisabledAndRequiresCapture() {
@@ -36,6 +37,7 @@ class CarPlayHudPolicyTest {
         policy.onCarPlay("capture", 1, raw(), 100)
         assertFalse(policy.snapshot(100).active)
         policy.onAndroidAutoAvailability(false, 100)
+        policy.onPassiveAndroidAutoAvailability(false, 100)
         assertTrue(policy.snapshot(100).active)
         policy.end("capture")
         assertFalse(policy.enabled)
@@ -129,6 +131,7 @@ class CarPlayHudPolicyTest {
         policy.onAndroidAutoAvailability(true, 100)
         assertFalse(policy.snapshot(100).active)
         policy.onAndroidAutoAvailability(false, 101)
+        policy.onPassiveAndroidAutoAvailability(false, 101)
         assertTrue(policy.snapshot(101).active)
         assertFalse(policy.snapshot(5_101).active)
         policy.onAndroidAutoAvailability(false, 6_000)
@@ -178,6 +181,7 @@ class CarPlayHudPolicyTest {
         policy.connect("new", 1)
         policy.setEnabled(true)
         policy.onCarPlay("new", 1, raw(), 100)
+        policy.onPassiveAndroidAutoAvailability(false, 100)
         policy.end("capture")
         policy.onCarPlay("capture", 1, raw(0), 101)
         assertTrue(policy.snapshot(101).active)
@@ -212,5 +216,78 @@ class CarPlayHudPolicyTest {
         lane.clear()
         lanes.clear()
         assertEquals(listOf(listOf(AndroidAutoNavigationTelemetry.LaneDirection(4, true))), policy.snapshot(100).lanes)
+    }
+
+    @Test fun legacyNegativeAloneAndPassiveUnknownNeverAuthorizeCarPlay() {
+        val policy = CarPlayHudPolicy().apply {
+            begin("capture", true); connect("capture", 1); onCarPlay("capture", 1, raw(), 100)
+            onAndroidAutoAvailability(false, 100)
+        }
+        assertFalse(policy.snapshot(100).active)
+        policy.onPassiveAndroidAutoAvailability(false, 100)
+        assertTrue(policy.snapshot(100).active)
+        policy.onPassiveAndroidAutoAvailability(null, 101)
+        assertFalse(policy.snapshot(101).active)
+        assertFalse(policy.isAndroidAutoKnownInactive(101))
+    }
+
+    @Test fun positiveFromEitherSourceAndRealHostAlwaysWinOverPassiveNegative() {
+        val policy = enabledPolicy()
+        policy.onCarPlay("capture", 1, raw(), 100)
+        policy.onAndroidAutoAvailability(true, 101)
+        policy.onPassiveAndroidAutoAvailability(false, 102)
+        assertFalse(policy.snapshot(102).active)
+        policy.onAndroidAutoAvailability(false, 103)
+        assertTrue(policy.snapshot(103).active)
+        assertFalse(policy.snapshot(103, hostAndroidAutoActive = true).active)
+        assertFalse(policy.isAndroidAutoKnownInactive(103, hostAndroidAutoActive = true))
+        policy.onPassiveAndroidAutoAvailability(true, 104)
+        policy.onAndroidAutoAvailability(false, 105)
+        assertFalse(policy.snapshot(105).active)
+    }
+
+    @Test fun outOfOrderNegativesCannotReplaceMoreRecentPositiveOrUnknownEvidence() {
+        val policy = enabledPolicy()
+        policy.onCarPlay("capture", 1, raw(), 100)
+        policy.onPassiveAndroidAutoAvailability(true, 200)
+        policy.onPassiveAndroidAutoAvailability(false, 199)
+        assertFalse(policy.snapshot(200).active)
+        policy.onPassiveAndroidAutoAvailability(null, 201)
+        policy.onPassiveAndroidAutoAvailability(false, 200)
+        assertFalse(policy.snapshot(201).active)
+        policy.onPassiveAndroidAutoAvailability(false, 202)
+        assertTrue(policy.snapshot(202).active)
+    }
+
+    @Test fun passiveObservationExpiryAndClearingNeverBorrowTheLegacyNegative() {
+        val policy = enabledPolicy()
+        policy.onCarPlay("capture", 1, raw(), 1000)
+        policy.onAndroidAutoAvailability(false, 5000)
+        assertFalse(policy.snapshot(5100).active)
+        policy.onPassiveAndroidAutoAvailability(false, 5100)
+        assertTrue(policy.snapshot(5100).active)
+        policy.clearPassiveObservation()
+        assertFalse(policy.snapshot(5101).active)
+    }
+
+    @Test fun privateDiagnosticsContainOnlyReasonsAgeBucketsAndBooleans() {
+        val policy = enabledPolicy()
+        policy.onCarPlay("capture", 1, raw(), 100)
+        val diagnostic = policy.diagnostic(101)
+        assertEquals("CARPLAY_TEXT", diagnostic["reason"])
+        assertEquals(true, diagnostic["published_active"])
+        assertFalse(diagnostic.toString().contains("Via de teste"))
+        assertFalse(diagnostic.toString().contains("150"))
+        assertTrue(diagnostic.keys.none { it.contains("street") || it.contains("distance") || it.contains("capture") })
+    }
+
+    @Test fun expiredGuidanceCannotCancelTheIndependentCaptureDeadline() {
+        val policy = enabledPolicy()
+        policy.onCarPlay("capture", 1, raw(), 100)
+        assertEquals(5100L, policy.nextRevalidationMs(100, 300100))
+        assertFalse(policy.snapshot(5100).active)
+        assertEquals(300100L, policy.nextRevalidationMs(5100, 300100))
+        assertNull(policy.nextRevalidationMs(300100, 300100))
+        assertNull(policy.nextRevalidationMs(5100, null))
     }
 }

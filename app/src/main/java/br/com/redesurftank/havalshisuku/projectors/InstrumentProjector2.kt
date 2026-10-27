@@ -295,6 +295,9 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
     private var lastProjectionPreparingD3: Boolean? = null
     private var lastAaClusterInDash: Boolean? = null
     private var lastProjectionCardOverlayAllowed: Boolean? = null
+    private val projectionCardOverlaySession = ProjectionCardOverlayPolicy.Session()
+    private val projectionCardOverlayAllowed: Boolean
+        get() = projectionCardOverlaySession.overlayAllowed
     private var lastHealthyCarPlayD3AtMs = 0L
     private var lastCarPlayD3HoldLogAtMs = 0L
     private var lastProjectionVisibilityLog = ""
@@ -806,6 +809,7 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
     }
 
     private fun resetProjectionStateCache() {
+        projectionCardOverlaySession.reset()
         lastCarPlayInDash = null
         lastProjectionMirrorInDash = null
         lastProjectionPreparingD3 = null
@@ -1055,6 +1059,38 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
         )
     }
 
+    private fun projectionOverlayIdentity(
+            carPlayInDash: Boolean,
+            projectionMirrorInDash: Boolean,
+            projectionPreparingD3: Boolean,
+            aaClusterInDash: Boolean
+    ): Int =
+            (if (carPlayInDash) 1 else 0) or
+                    (if (projectionMirrorInDash) 2 else 0) or
+                    (if (projectionPreparingD3) 4 else 0) or
+                    (if (aaClusterInDash) 8 else 0)
+
+    private fun projectionOverlayIdentity(snapshot: ProjectionSnapshot): Int =
+            projectionOverlayIdentity(
+                    snapshot.carPlayInDash,
+                    snapshot.projectionMirrorInDash,
+                    snapshot.projectionPreparingD3,
+                    snapshot.aaClusterInDash
+            )
+
+    private fun armProjectionCardOverlayFromInput() {
+        val snapshot = readProjectionSnapshotForCardChange()
+        projectionCardOverlaySession.onPhysicalInput(
+                projectionOverlayIdentity(snapshot),
+                SystemClock.uptimeMillis()
+        )
+        pushProjectionStateToWebView(
+                snapshot.carPlayInDash,
+                snapshot.projectionMirrorInDash,
+                snapshot.projectionPreparingD3
+        )
+    }
+
     private fun pushProjectionStateToWebView(
             carPlayInDash: Boolean,
             projectionMirrorInDash: Boolean,
@@ -1062,6 +1098,14 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
             force: Boolean = false
     ) {
         val aaClusterInDash = isAaClusterInDash()
+        projectionCardOverlaySession.syncProjection(
+                projectionOverlayIdentity(
+                        carPlayInDash,
+                        projectionMirrorInDash,
+                        projectionPreparingD3,
+                        aaClusterInDash
+                )
+        )
         val sendCarPlay = force || lastCarPlayInDash != carPlayInDash
         val sendProjectionMirror = force || lastProjectionMirrorInDash != projectionMirrorInDash
         val sendProjectionPreparing = force || lastProjectionPreparingD3 != projectionPreparingD3
@@ -1110,17 +1154,17 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
             lastAaClusterInDash = aaClusterInDash
         }
 
-        // May the card menu be drawn over the projection? Only a card-backed menu has
-        // anything to draw — card 0 is the car's own content and must stay clear.
-        //
-        // getAvailableKeys() has always advertised this key and the Default theme has
-        // always subscribed to it, but nothing here ever sent a value, so it sat on its
-        // `false` default for the theme's whole lifetime. The theme reads that as "never
-        // overlay", which is why the right-hand circle went blank for the entire time a
-        // map was in the dash: every rule meant to bring the menu back is written against
-        // .projection-card-overlay-active.
-        val cardOverlayAllowed = ClusterCardFlowPolicy.isCardBackedMenu(currentCard)
+        // Physical input authorizes the session. A bootstrap card, or a later neutral card,
+        // does not create or revoke that authorization. The theme chooses what to draw.
+        val cardOverlayAllowed = projectionCardOverlayAllowed
         if (force || lastProjectionCardOverlayAllowed != cardOverlayAllowed) {
+            logClusterPerfEvent(
+                    "projection_card_overlay",
+                    mapOf(
+                            "allowed" to cardOverlayAllowed,
+                            "reason" to if (cardOverlayAllowed) "physical_input_or_overlay_session" else "no_recent_input"
+                    )
+            )
             evaluateJsIfReady(
                     webView,
                     "control('projectionCardOverlayAllowed', $cardOverlayAllowed)"
@@ -1177,6 +1221,11 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
         updateKnownScreenForCard(nextCard)
 
         val snapshot = readProjectionSnapshotForCardChange()
+        // Input evidence belongs to this projection, never a key from before it became active.
+        projectionCardOverlaySession.onCardChanged(
+                projectionOverlayIdentity(snapshot),
+                SystemClock.uptimeMillis()
+        )
         val projectionStateMayBeStale = isProjectionStateMayBeStale(snapshot)
         val hasManagedSecondaryDisplayWork = hasManagedSecondaryDisplayWork()
         val cardCanAffectManagedAppBounds =
@@ -1194,7 +1243,9 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
             lastAppliedConfigs.clear()
         }
 
-        if (decision.pushProjectionStateBeforeCard) {
+        if (decision.pushProjectionStateBeforeCard ||
+                        lastProjectionCardOverlayAllowed != projectionCardOverlayAllowed
+        ) {
             // During projection, projection classes must reach JS before
             // cardId to avoid a one-frame opaque AC/main menu repaint.
             pushProjectionStateToWebView(
@@ -1281,6 +1332,7 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
                             val keyCode = args.getOrNull(1) as? Int ?: -1
                             val action = args.getOrNull(2) as? Int ?: -1
                             logClusterInputKey(keyName, keyCode, action)
+                            armProjectionCardOverlayFromInput()
                         }
                         ServiceManagerEventType.STEERING_WHEEL_AC_CONTROL -> {
                             val action = args[0]
@@ -2196,6 +2248,15 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
         updates["projectionMirrorInDash"] = projectionMirrorInDash.toString()
         updates["projectionPreparingD3"] = projectionPreparingD3.toString()
         updates["aaClusterInDash"] = isAaClusterInDash().toString()
+        projectionCardOverlaySession.syncProjection(
+                projectionOverlayIdentity(
+                        carPlayInDash,
+                        projectionMirrorInDash,
+                        projectionPreparingD3,
+                        isAaClusterInDash()
+                )
+        )
+        updates["projectionCardOverlayAllowed"] = projectionCardOverlayAllowed.toString()
         updates["warningActive"] = isWarningActive.toString()
         updates["warningDismissed"] = isWarningDismissed.toString()
         // cardId is deliberately NOT in this map: batchEvaluateJs would emit it as

@@ -869,6 +869,11 @@ void realEntryShapeAndSessionCapture() {
 void initialBootstrapGuards() {
     assert(impulse_carplay_initial_bootstrap_abi() == 1);
     assert(impulse_carplay_initial_bootstrap_state() == 0);
+    assert(pinnedInitialModuleSymbol("libCoreUtils_ts.so", "CFRelease") == nullptr);
+    assert(impulse_carplay_prepare_initial_entries_for_oem_namespace(nullptr) == VideoBridge::rejected);
+    assert(impulse_carplay_prepare_initial_entries_for_oem_namespace(
+        reinterpret_cast<const void*>(initialBootstrapGuards)) == VideoBridge::decoderFailure);
+    assert(impulse_carplay_release_initial_preparation() == 0);
     assert(impulse_carplay_prepare_initial_entries() == VideoBridge::decoderFailure);
     assert(impulse_carplay_release_initial_preparation() == 0);
     assert(impulse_carplay_bootstrap_initial_entries(nullptr, nullptr, nullptr, nullptr, nullptr,

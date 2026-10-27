@@ -1,9 +1,9 @@
 #include "live_surface_activation.h"
 
 #include "hook_permit.h"
+#include "initial_entry_bootstrap.h"
 #include "surface_runtime_preparation.h"
 
-#include <dlfcn.h>
 #include <time.h>
 #include <limits>
 #include <mutex>
@@ -17,30 +17,23 @@ using CreateString = observed_abi::String (*)(void*, const char*, std::uint32_t)
 
 class LiveDisplayApis final {
 public:
-    LiveDisplayApis() {
-        airplay_ = dlopen("/vendor/app/TsCarPlayService/lib/arm64/libAirPlay_ts.so", RTLD_NOW | RTLD_NOLOAD);
-        core_ = dlopen("/vendor/app/TsCarPlayService/lib/arm64/libCoreUtils_ts.so", RTLD_NOW | RTLD_NOLOAD);
-        if (!airplay_ || !core_) { throw std::runtime_error("Attested OEM display modules unavailable"); }
-        copy = reinterpret_cast<CreateArrayCopy>(dlsym(core_, "CFLArrayCreateCopy"));
-        release = reinterpret_cast<ReleaseCfObject>(dlsym(core_, "CFRelease"));
-        createString = reinterpret_cast<CreateString>(dlsym(core_, "CFStringCreateWithCString"));
+    explicit LiveDisplayApis(std::shared_ptr<void> owners) : owners_(std::move(owners)) {
+        if (!owners_) { throw std::runtime_error("Attested OEM display module owners unavailable"); }
+        copy = reinterpret_cast<CreateArrayCopy>(pinnedInitialModuleSymbol("libCoreUtils_ts.so", "CFLArrayCreateCopy"));
+        release = reinterpret_cast<ReleaseCfObject>(pinnedInitialModuleSymbol("libCoreUtils_ts.so", "CFRelease"));
+        createString = reinterpret_cast<CreateString>(pinnedInitialModuleSymbol("libCoreUtils_ts.so", "CFStringCreateWithCString"));
         append = reinterpret_cast<AddAlternateDisplay>(
-            dlsym(airplay_, "AirPlayInfoArrayAddAltScreenDisplay"));
+            pinnedInitialModuleSymbol("libAirPlay_ts.so", "AirPlayInfoArrayAddAltScreenDisplay"));
         if (!copy || !release || !createString || !append) {
             throw std::runtime_error("Exact OEM display APIs unavailable");
         }
-    }
-    ~LiveDisplayApis() {
-        if (core_) { dlclose(core_); }
-        if (airplay_) { dlclose(airplay_); }
     }
     CreateArrayCopy copy = nullptr;
     ReleaseCfObject release = nullptr;
     CreateString createString = nullptr;
     AddAlternateDisplay append = nullptr;
 private:
-    void* airplay_ = nullptr;
-    void* core_ = nullptr;
+    const std::shared_ptr<void> owners_;
 };
 
 std::atomic<LiveDisplayApis*> activeApis{nullptr};
@@ -100,7 +93,7 @@ HookInstallResult activateLiveSurface(std::int64_t surfaceHandle, std::uint32_t 
             return HookInstallResult::rejected;
         }
 
-        auto api = std::make_shared<LiveDisplayApis>();
+        auto api = std::make_shared<LiveDisplayApis>(entry->nativeOwners());
         stagedApi = api;
         {
             std::lock_guard<std::mutex> lock(activeApiMutex);

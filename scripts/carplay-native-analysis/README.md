@@ -1,5 +1,21 @@
 # Offline CarPlay native audit
 
+## PR 15 update through the cold direct arm
+
+The persistent bridge is no longer an external-only artifact. Debug and Release
+builds on the authorized host compile the ARM64 library and package it under
+`assets/carplay_bridge/` together with a hash-pinned launcher, ESM Java endpoint,
+derived injector and manifest. It remains excluded from `jniLibs`: Impulse never
+loads it into its own process, and the OEM-side loader still requires the guarded
+cold bootstrap. Automatic preparation is opt-in and the five-minute map test is
+still manual.
+
+The latest source separates non-destructive cold attach from warm restart. A cold
+process with exact identity, no OEM modules, no bridge mapping and a fresh visual
+sample explicitly clear of CarPlay/Android Auto may be armed without letting stale
+DCM rows veto it. A warm process still requires complete DCM/Bluetooth quiescence.
+See `docs/architecture/carplay-pr15-update-through-149.md`.
+
 ## Cold passthrough operator controller — 2026-10-23
 
 `cold_passthrough_controller.py` stages and verifies the reviewed bridge/launcher,
@@ -29,8 +45,8 @@ Debug assembly in 2m19s. assembleDebug now also runs testDebugUnitTest. XML repo
 837 tests, zero failures/errors, one expected seed-generator skip. All seven new
 experimental Debug policy/retirement methods executed/passed. Earlier pending-test
 notes below describe the implementation stages, not current validation status.
-Linked native runtime exports verified; bridge remains excluded from the internal
-Debug APK. No production signing/version/OTA/install or vehicle test performed.
+Linked native runtime exports verified; at that historical checkpoint the bridge
+was still excluded from the internal Debug APK. No production signing/version/OTA/install or vehicle test performed.
 This does not prove Binder/GPU/OEM ownership, actual hook installation or clean map.
 
 Read-only ELF analysis, not an Android feature, native patch or deployment tool.
@@ -165,9 +181,10 @@ g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined \
 ```
 
 The app's CMake build compiles/links the Android target only on ARM64, using the
-pinned NDK/CMake. The resulting libcarplay_video_bridge.so is explicitly excluded
-from the APK, and the C++ runtime is linked statically. This validates compilation
-without adding a loadable runtime dependency or restricting existing APK ABIs.
+pinned NDK/CMake. The resulting `libcarplay_video_bridge.so` is explicitly excluded
+from `jniLibs`, and the C++ runtime is linked statically. Current authorized-host
+builds package it as a hashed opaque asset for the guarded OEM loader; Impulse does
+not load it as a JNI dependency and existing APK ABIs remain unrestricted.
 All Android builds go through the audited Mac Mini queue, never the coordinator.
 
 Not implemented: actual OEM interception/loader installation, Surface transfer,
@@ -255,8 +272,9 @@ display. Neither different Java/native wrapper pointers nor Binder transfer prov
 independence from the principal BufferQueue. This code deliberately does not borrow
 the existing CarPlay Surface, create a Presentation, change resolution, move an
 Activity or negotiate a display. No Binder/Surface/JNI path has run on Android yet.
-The shared library remains excluded from all APKs; invoking this debug endpoint
-without a separately authorized loader fails rather than loading code implicitly.
+The shared library remains excluded from `jniLibs`; current builds may carry it as
+a verified opaque bridge asset. Invoking this debug endpoint without the separately
+authorized OEM loader still fails rather than loading code implicitly.
 
 Portable lease tests (fake decoder, not Android Binder or AMediaCodec):
 

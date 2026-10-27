@@ -96,7 +96,11 @@ REQUIRED_TOKENS = {
         "removes the user-selected display overlay",
         "custom_theme_projection_display_compat",
         "projectionCardOverlayAllowed",
-        "ProjectionCardOverlayPolicy.shouldAllowAfterCardChange",
+        "ProjectionCardOverlayPolicy.Session()",
+        "projectionCardOverlaySession.onPhysicalInput(",
+        "projectionCardOverlaySession.onCardChanged(",
+        "projectionCardOverlaySession.syncProjection(",
+        'updates["projectionCardOverlayAllowed"] = projectionCardOverlayAllowed.toString()',
         "physical_input_or_overlay_session",
         "CLUSTER_INPUT_KEY",
         "no_recent_input",
@@ -121,8 +125,14 @@ REQUIRED_TOKENS = {
         "shouldArmFromClusterInput",
         "shouldAllowAfterCardChange",
         "overlayAlreadyAllowed",
+        "class Session",
+        "lastPhysicalInputAtMs",
+        "projectionIdentity",
+        "fun onPhysicalInput(",
+        "fun onCardChanged(",
+        "fun reset()",
     ],
-    "cluster-widgets/default/src/core/main.js": [
+    "cluster-widgets/source/v1.0/default/src/core/main.js": [
         "projectionCardOverlayAllowed",
         "function isMainMenuSessionScreen(screen)",
         "return isMainMenuSessionScreen(screen) || screen === 'aircon';",
@@ -167,12 +177,14 @@ ANDROID_AUTO_JUSTIFICATION_TOKEN = "ANDROID_AUTO_CHANGE_JUSTIFICATION:"
 RISKY_DIFF_PATH_PREFIXES = (
     "app/src/main/java/",
     "cluster-widgets/default/src/",
+    "cluster-widgets/source/v1.0/default/src/",
 )
 
 RISKY_ADDED_LINE_PATTERNS = [
     (
         "windowAlpha=0 / transparent Presentation bypass",
-        re.compile(r"\b(?:windowAlpha|attrs\.alpha|alpha)\s*=\s*0(?:\.0)?f?\b"),
+        # Do not accept the zero prefix of a nonzero literal such as 0.25f.
+        re.compile(r"\b(?:windowAlpha|attrs\.alpha|alpha)\s*=\s*0(?:\.0+)?f?(?![\w.])"),
     ),
     (
         "CarPlay VIDEO_FOCUS_CHANGE in new functional code",

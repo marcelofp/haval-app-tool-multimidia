@@ -38,14 +38,19 @@ CONTROL_ROOT = "/data/local/tmp/impulse-carplay/control"
 REMOTE_BRIDGE = f"{STAGE_ROOT}/libcarplay_video_bridge.so"
 REMOTE_LAUNCHER = f"{STAGE_ROOT}/cold-launcher.js"
 REMOTE_LOG = f"{STAGE_ROOT}/injector.log"
+REMOTE_STATUS = f"{STAGE_ROOT}/cold-state.json"
 REMOTE_ENDPOINT_LAUNCHER = f"{STAGE_ROOT}/clean-map-endpoint.js"
 REMOTE_ENDPOINT_LOG = f"{STAGE_ROOT}/clean-map-endpoint.log"
+REMOTE_ENDPOINT_STATUS = f"{STAGE_ROOT}/clean-map-endpoint-state.log"
 REMOTE_INJECTOR = "/data/local/tmp/fridainjector"
 REMOTE_SERVICE_PATCH = "/data/local/tmp/carplay_patches/TsCarPlayService.apk"
 MOUNTED_SERVICE = "/vendor/app/TsCarPlayService/TsCarPlayService.apk"
 EXPECTED_GATE_MD5 = "b61f0e4d63535a2ef447be559211697b"
 PRINCIPAL_UUID = "e5f7a68d-7b0f-4305-984b-974f677a150b"
 PID_PLACEHOLDER = 1_234_567_890
+ENDPOINT_STATUS_MANUAL = "manual"
+ENDPOINT_STATUS_PROCESS = "process-runtime-v1"
+RUNTIME_ROOT = "/data/local/tmp/impulse-carplay/runtime"
 # This OEM console canonicalizes typed ASCII to lowercase, including marker
 # literals embedded in commands. Keep the wire marker lowercase so completion
 # detection observes the bytes that are actually printed.
@@ -70,6 +75,8 @@ def launcher_for_pid(interceptor: str, profile: object, pid: int,
         bridge_size,
         bridge_sha256,
         PRINCIPAL_UUID,
+        status_path=REMOTE_STATUS,
+        cold_load_timeout_ms=300_000,
     )
 
 
@@ -101,16 +108,135 @@ def classify_injector_log(log: str) -> str:
     return phases[-1] if phases else "unknown"
 
 
-def endpoint_launcher(source: str) -> str:
+def endpoint_launcher(source: str, *, bridge_path: str = REMOTE_BRIDGE,
+                      status_mode: str = ENDPOINT_STATUS_MANUAL) -> str:
     if "Persistent OEM-process control plane" not in source or "rpc.exports" not in source:
         raise ValueError("unexpected clean-map endpoint source")
-    return source.rstrip() + f"""
-
-rpc.exports.arm({{ bridgePath: {json.dumps(REMOTE_BRIDGE)} }}).then(
-    state => send({{ kind: 'impulse-carplay-clean-map-control', state }}),
-    error => send({{ kind: 'impulse-carplay-clean-map-control', state: 'failed', error: String(error) }})
-);
+    if (not re.fullmatch(r"/data/local/tmp/impulse-carplay/[A-Za-z0-9._/-]+/libcarplay_video_bridge\.so", bridge_path)
+            or any(part in {".", ".."} for part in bridge_path.split("/"))):
+        raise ValueError("Endpoint bridge path is outside the private staging root")
+    if status_mode not in {ENDPOINT_STATUS_MANUAL, ENDPOINT_STATUS_PROCESS}:
+        raise ValueError("Unsupported endpoint status mode")
+    status_setup = ""
+    status_expression = json.dumps(REMOTE_ENDPOINT_STATUS)
+    if status_mode == ENDPOINT_STATUS_PROCESS:
+        status_setup = r"""const impulseEndpointStatusPath = (() => {
+    const read = (path, max) => {
+        const file = new File(path, 'r');
+        try {
+            // procfs reports stat_size=0; implicit readText() can return empty.
+            const text = file.readText(max + 1);
+            if (typeof text !== 'string' || text.length > max) throw new Error('Kernel identity input exceeds bound');
+            return text;
+        } finally { try { file.close(); } catch (_) {} }
+    };
+    const boot = read('/proc/sys/kernel/random/boot_id', 128).trim().toLowerCase();
+    if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(boot)) {
+        throw new Error('Invalid kernel boot identity');
+    }
+    const stat = read('/proc/self/stat', 4096).trim();
+    const end = stat.lastIndexOf(') ');
+    const fields = end >= 0 ? stat.slice(end + 2).split(/\s+/) : [];
+    const start = fields[19];
+    if (!Number.isSafeInteger(Process.id) || Process.id <= 0 ||
+        stat.slice(0, stat.indexOf(' (')) !== String(Process.id) ||
+        !/^[1-9][0-9]*$/.test(start || '') || ['Z', 'X', 'x'].includes(fields[0])) {
+        throw new Error('Invalid OEM process start identity');
+    }
+    return '/data/local/tmp/impulse-carplay/runtime/' + boot + '-' + Process.id + '-' + start + '/endpoint-state.log';
+})();
 """
+        status_expression = "impulseEndpointStatusPath"
+    # fridainjector stdout is redirected and can remain buffered for the whole
+    # short cold gate. Persist acknowledgements in the target process instead.
+    publisher = f"""
+{status_setup}function impulsePublishEndpoint(payload) {{
+    const file = new File({status_expression}, 'a');
+    try {{ file.write(JSON.stringify(payload) + '\\n'); file.flush(); }} finally {{ file.close(); }}
+    send(payload);
+}}
+"""
+    instrumented = source.replace("send({", "impulsePublishEndpoint({")
+    residency = (Path(__file__).resolve().parent / "impulse_residency_peer.js").read_text(encoding="utf-8")
+    return residency + "\n" + publisher + instrumented.rstrip() + f"""
+
+// RegisterNatives and Java receivers publish callbacks into this script. Pin
+// before scheduling arm, including if eternalization later fails or is interrupted.
+if (typeof Script === 'undefined' || typeof Script.pin !== 'function') {{
+    throw new Error('Script pinning is required before publishing Java callbacks');
+}}
+Script.pin();
+impulsePublishEndpoint({{ kind: 'impulse-carplay-clean-map-control', state: 'loaded' }});
+const impulseEndpointExports = rpc.exports;
+const impulseEndpointResidency = createImpulseResidencyPeer('java', {json.dumps(bridge_path)},
+    () => impulseEndpointExports.state());
+const impulseEndpointArm = Promise.resolve().then(() =>
+    impulseEndpointExports.arm({{ bridgePath: {json.dumps(bridge_path)} }}));
+impulseEndpointArm.then(
+    state => impulsePublishEndpoint({{ kind: 'impulse-carplay-clean-map-control', state }}),
+    error => impulsePublishEndpoint({{ kind: 'impulse-carplay-clean-map-control', state: 'failed', error: String(error) }}));
+impulseEndpointExports.init = (_stage, parameters) => impulseEndpointArm.then(state => {{
+    if (parameters && parameters.impulseResidency !== undefined) {{
+        impulseEndpointResidency.init(parameters.impulseResidency);
+    }}
+    return state;
+}});
+impulseEndpointExports.dispose = reason => impulseEndpointResidency.dispose(reason);
+"""
+
+
+def endpoint_agent_entry(source: str, *, bridge_path: str = REMOTE_BRIDGE,
+                         status_mode: str = ENDPOINT_STATUS_MANUAL) -> str:
+    return 'import Java from "frida-java-bridge";\n' + endpoint_launcher(
+        source, bridge_path=bridge_path, status_mode=status_mode)
+
+
+def validate_endpoint_module(payload: bytes) -> None:
+    # Node16 emits CommonJS for a package without type=module. Gum's archive
+    # loader does not supply exports/require, so that entry never reaches arm().
+    try:
+        header, body = payload.split("✄\n".encode(), 1)
+        match = re.match(rb"\xf0\x9f\x93\xa6\n([0-9]+) /agent\.js\n", header)
+        if not match:
+            raise ValueError("Missing endpoint archive entry")
+        size = int(match.group(1))
+        entry = body[:size].decode("utf-8")
+        if len(body) < size or not re.search(r'(?m)^import Java from [\"\']frida-java-bridge[\"\'];', entry):
+            raise ValueError("Endpoint entry is not an ES module")
+        if re.search(r'\b(?:require\s*\(|Object\.defineProperty\(exports\b)', entry):
+            raise ValueError("CommonJS endpoint entry cannot run in Gum")
+    except (UnicodeError, ValueError) as error:
+        raise ValueError("Invalid endpoint ES module: " + str(error)) from error
+
+
+def read_endpoint_bundle(path: Path, *, bridge_path: str = REMOTE_BRIDGE,
+                         status_mode: str = ENDPOINT_STATUS_MANUAL) -> str:
+    root = Path(__file__).resolve().parent
+    manifest = json.loads(path.with_suffix(path.suffix + ".manifest.json").read_text(encoding="utf-8"))
+    payload = path.read_bytes()
+    source = (root / "carplay_clean_map_endpoint.js").read_text(encoding="utf-8")
+    package = json.loads((root / "agent/package.json").read_text(encoding="utf-8"))
+    expected = {
+        "kind": "impulse-clean-map-frida-agent-v1",
+        "bundleSha256": sha256_bytes(payload),
+        "entrySha256": sha256_bytes(endpoint_agent_entry(
+            source, bridge_path=bridge_path, status_mode=status_mode).encode()),
+        "packageLockSha256": sha256_bytes((root / "agent/package-lock.json").read_bytes()),
+        "packageJsonSha256": sha256_bytes((root / "agent/package.json").read_bytes()),
+        "moduleMode": "esm-node16",
+        "javaBridgeVersion": package["dependencies"]["frida-java-bridge"],
+        "compilerVersion": package["devDependencies"]["frida-compile"],
+        "bridgePath": bridge_path,
+    }
+    # Old, validated manual archives predate this field. Process-scoped archives
+    # must declare the mode explicitly; entrySha256 also pins its implementation.
+    if status_mode != ENDPOINT_STATUS_MANUAL or "statusMode" in manifest:
+        expected["statusMode"] = status_mode
+    for name, value in expected.items():
+        if manifest.get(name) != value:
+            raise ValueError("Endpoint bundle is stale or altered: " + name)
+    validate_endpoint_module(payload)
+    return payload.decode("utf-8")
 
 
 def shell_quote(value: str) -> str:
@@ -255,12 +381,36 @@ class Inputs:
     interceptor: Path
     profile: Path
     endpoint: Path
+    endpoint_is_bundle: bool = False
 
     def read(self) -> tuple[bytes, str, object, str]:
         bridge = self.bridge.read_bytes()
         interceptor = self.interceptor.read_text(encoding="utf-8")
         profile = json.loads(self.profile.read_text(encoding="utf-8"))
-        return bridge, interceptor, profile, self.endpoint.read_text(encoding="utf-8")
+        endpoint = (read_endpoint_bundle(self.endpoint) if self.endpoint_is_bundle
+                    else self.endpoint.read_text(encoding="utf-8"))
+        return bridge, interceptor, profile, endpoint
+
+
+@dataclass(frozen=True)
+class ProcessIdentity:
+    pid: int
+    start_time_ticks: int
+
+
+def process_identity_from_stat(stat: str, expected_pid: int) -> ProcessIdentity:
+    # comm (field 2) may contain spaces or parentheses; fields after its final
+    # closing parenthesis start at state (field 3). starttime is field 22.
+    head, separator, tail = stat.rpartition(") ")
+    fields = tail.split()
+    try:
+        pid = int(head.split(" (", 1)[0])
+        start_time = int(fields[19])
+    except (ValueError, IndexError):
+        raise ControllerError("Unable to read OEM CarPlay process identity") from None
+    if not separator or pid != expected_pid or start_time <= 0 or fields[0] in {"Z", "X", "x"}:
+        raise ControllerError("OEM CarPlay process is absent, dead or replaced")
+    return ProcessIdentity(pid, start_time)
 
 
 class ColdPassthroughController:
@@ -270,6 +420,7 @@ class ColdPassthroughController:
         self.nonce: str | None = None
         self.pid: int | None = None
         self.oem_uid: int | None = None
+        self.process_identity: ProcessIdentity | None = None
 
     def preflight(self) -> dict[str, str]:
         output = self.remote.run(
@@ -301,11 +452,12 @@ class ColdPassthroughController:
         bridge, interceptor, profile, endpoint = self.inputs.read()
         bridge_sha = sha256_bytes(bridge)
         template = launcher_template(interceptor, profile, len(bridge), bridge_sha).encode()
-        endpoint_script = endpoint_launcher(endpoint).encode()
+        endpoint_script = (endpoint if self.inputs.endpoint_is_bundle else endpoint_launcher(endpoint)).encode()
         self.remote.run(
             f"mkdir -p {shell_quote(STAGE_ROOT)} {shell_quote(CONTROL_ROOT)}; "
             f"chmod 700 {shell_quote(STAGE_ROOT)} {shell_quote(CONTROL_ROOT)}; "
             f"rm -f {shell_quote(REMOTE_LOG)} {shell_quote(REMOTE_ENDPOINT_LOG)} "
+            f"{shell_quote(REMOTE_STATUS)} {shell_quote(REMOTE_ENDPOINT_STATUS)} "
             f"{shell_quote(CONTROL_ROOT)}/release.*"
         )
         print("[cold] uploading bridge", file=sys.stderr, flush=True)
@@ -353,15 +505,75 @@ class ColdPassthroughController:
                 return int(value)
         raise ControllerError("Fresh OEM CarPlay host did not appear inside the cold-gate window")
 
+    def _process_snapshot(self, status_command: str = ":") -> tuple[ProcessIdentity, str]:
+        if self.pid is None:
+            raise ControllerError("OEM CarPlay process identity has not been established")
+        marker = "identity_status_" + secrets.token_hex(8)
+        # Bracket the status read in one shell round trip. A stale state file
+        # cannot authorize a replacement process, including reuse of the PID.
+        output = self.remote.run(
+            "printf '\\nidentity_pids_before='; " + f"pidof {OEM_PROCESS} 2>/dev/null || true; "
+            "printf '\\nidentity_stat_before='; " + f"cat /proc/{self.pid}/stat 2>/dev/null || true; "
+            "printf '\\nidentity_cmdline='; "
+            + f"tr '\\000' '\\n' < /proc/{self.pid}/cmdline 2>/dev/null | head -n 1; "
+            + f"printf '\\n{marker}_begin\\n'; " + status_command + "; "
+            + f"printf '\\n{marker}_end\\n'; "
+            + "printf 'identity_stat_after='; " + f"cat /proc/{self.pid}/stat 2>/dev/null || true; "
+            + "printf '\\nidentity_pids_after='; " + f"pidof {OEM_PROCESS} 2>/dev/null || true",
+            check=False,
+        )
+        def field(name: str) -> str:
+            values = re.findall(r"(?m)^" + name + r"=([^\n]*)$", output)
+            if len(values) != 1:
+                raise ControllerError("Unable to verify OEM CarPlay process identity")
+            return values[0].strip()
+        if field("identity_cmdline") != OEM_PROCESS or any(
+            field(name).split() != [str(self.pid)]
+            for name in ("identity_pids_before", "identity_pids_after")
+        ):
+            raise ControllerError("OEM CarPlay process exited or was replaced; refusing stale status")
+        before = process_identity_from_stat(field("identity_stat_before"), self.pid)
+        after = process_identity_from_stat(field("identity_stat_after"), self.pid)
+        if before != after:
+            raise ControllerError("OEM CarPlay PID was reused while reading status")
+        match = re.search(r"(?m)^" + marker + r"_begin\n(.*?)\n" + marker + r"_end$", output, re.DOTALL)
+        if not match:
+            raise ControllerError("OEM CarPlay status framing was not returned")
+        return after, match.group(1)
+
+    def _live_status(self, command: str) -> str:
+        if self.process_identity is None:
+            raise ControllerError("OEM CarPlay process identity has not been bound")
+        identity, status = self._process_snapshot(command)
+        if identity != self.process_identity:
+            raise ControllerError("OEM CarPlay PID was reused; refusing stale status")
+        return status
+
     def _wait_phase(self, expected: set[str], deadline: float) -> tuple[str, str]:
         last_log = ""
         while time.monotonic() < deadline:
-            last_log = self.remote.run(f"tail -n 120 {shell_quote(REMOTE_LOG)} 2>/dev/null || true", check=False)
+            last_log = self._live_status(f"cat {shell_quote(REMOTE_STATUS)} 2>/dev/null || true")
             phase = classify_injector_log(last_log)
             if phase in expected:
                 return phase, last_log
             time.sleep(0.1)
         return classify_injector_log(last_log), last_log
+
+    def _wait_endpoint(self, deadline: float) -> str:
+        endpoint_log = ""
+        while time.monotonic() < deadline:
+            endpoint_log = self._live_status(
+                f"tail -n 80 {REMOTE_ENDPOINT_STATUS} 2>/dev/null || true"
+            )
+            # Only the most recent endpoint state can acknowledge this attempt.
+            states = re.findall(r'"state"\s*:\s*"([^"\n]+)"', endpoint_log)
+            state = states[-1] if states else None
+            if state == "armed":
+                return endpoint_log
+            if state == "failed":
+                raise ControllerError(f"Clean-map endpoint failed to arm: {endpoint_log[-1200:]}")
+            time.sleep(0.1)
+        raise ControllerError(f"Clean-map endpoint did not arm: {endpoint_log[-1200:]}")
 
     def run(self) -> dict[str, str | int]:
         print("[cold] preflight", file=sys.stderr, flush=True)
@@ -383,12 +595,11 @@ class ColdPassthroughController:
             print("[cold] old host terminated", file=sys.stderr, flush=True)
             deadline = time.monotonic() + 8.0
             self.pid = self._wait_new_pid(old_pid, deadline)
-            print(f"[cold] fresh host pid={self.pid}", file=sys.stderr, flush=True)
-            maps_status = self.remote.run(
+            self.process_identity, maps_status = self._process_snapshot(
                 f"printf 'maps_loaded='; if grep -qi -e libairplay_ts -e libcarplaystack "
-                f"-e libcoreutils_ts /proc/{self.pid}/maps; then echo yes; else echo no; fi",
-                check=False,
+                f"-e libcoreutils_ts /proc/{self.pid}/maps; then echo yes; else echo no; fi"
             )
+            print(f"[cold] fresh host pid={self.pid}", file=sys.stderr, flush=True)
             loaded = re.findall(r"(?m)^maps_loaded=(yes|no)$", maps_status)
             if not loaded or loaded[-1] != "no":
                 raise ControllerError("OEM libraries loaded before injector arming; refusing warm interception")
@@ -401,7 +612,7 @@ class ColdPassthroughController:
                 + shell_quote(f's/{PID_PLACEHOLDER}/{self.pid}/')
                 + " " + shell_quote(REMOTE_LAUNCHER)
             )
-            observed = self.remote.run(
+            observed = self._live_status(
                 f"sha256sum {shell_quote(REMOTE_LAUNCHER)} | awk '{{print $1}}'"
             ).strip().splitlines()[-1]
             if observed != sha256_bytes(exact):
@@ -427,34 +638,24 @@ class ColdPassthroughController:
                 f"chown {self.oem_uid}:{self.oem_uid} {shell_quote(release_file)}; "
                 f"chmod 400 {shell_quote(release_file)}"
             )
-            print("[cold] startup released", file=sys.stderr, flush=True)
-            phase, log = self._wait_phase({"installed-pinned", "failed", "failed-pinned"}, time.monotonic() + 8.0)
+            print("[cold] startup released; armed for first iPhone connection (up to 5 minutes)", file=sys.stderr, flush=True)
+            phase, log = self._wait_phase({"installed-pinned", "failed", "failed-pinned"}, time.monotonic() + 300.0)
             if phase != "installed-pinned":
                 raise ControllerError(f"Cold interceptor did not install passthrough (phase={phase}): {log[-1200:]}")
             persistent_endpoint = (
                 f"{REMOTE_INJECTOR} -p {self.pid} -s {REMOTE_ENDPOINT_LAUNCHER} -R qjs"
             )
+            self._live_status(":")
             self.remote.run(
                 f"nohup setsid sh -c \"$(printf {shell_quote(shell_octal_command(persistent_endpoint))})\" "
                 f"> {REMOTE_ENDPOINT_LOG} 2>&1 < /dev/null & :"
             )
             print("[cold] endpoint launched", file=sys.stderr, flush=True)
-            endpoint_deadline = time.monotonic() + 8.0
-            endpoint_log = ""
-            while time.monotonic() < endpoint_deadline:
-                endpoint_log = self.remote.run(
-                    f"tail -n 80 {REMOTE_ENDPOINT_LOG} 2>/dev/null || true", check=False
-                )
-                if '"state":"armed"' in endpoint_log:
-                    break
-                if '"state":"failed"' in endpoint_log:
-                    raise ControllerError(f"Clean-map endpoint failed to arm: {endpoint_log[-1200:]}")
-                time.sleep(0.1)
-            else:
-                raise ControllerError(f"Clean-map endpoint did not arm: {endpoint_log[-1200:]}")
+            self._wait_endpoint(time.monotonic() + 8.0)
             return {
                 **staged,
                 "pid": self.pid,
+                "processStartTimeTicks": self.process_identity.start_time_ticks,
                 "phase": phase,
                 "injectorLog": REMOTE_LOG,
                 "endpointLog": REMOTE_ENDPOINT_LOG,
@@ -472,10 +673,11 @@ class ColdPassthroughController:
 def default_inputs() -> Inputs:
     root = Path(__file__).resolve().parent
     return Inputs(
-        bridge=Path("/root/projects/haval-impulse/artifacts/carplay-clean-map-81923701-debug/native/libcarplay_video_bridge.so"),
+        bridge=Path("/root/projects/haval-impulse/artifacts/carplay-namespace-2f6e6961-debug/native/libcarplay_video_bridge.so"),
         interceptor=root / "cold_oem_interceptor.js",
         profile=root / "testdata/oem-cold-profile-v3.json",
-        endpoint=root / "carplay_clean_map_endpoint.js",
+        endpoint=root / "agent/dist/clean-map-agent.js",
+        endpoint_is_bundle=True,
     )
 
 
@@ -487,7 +689,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bridge", type=Path, default=defaults.bridge)
     parser.add_argument("--interceptor", type=Path, default=defaults.interceptor)
     parser.add_argument("--profile", type=Path, default=defaults.profile)
-    parser.add_argument("--endpoint", type=Path, default=defaults.endpoint)
+    endpoints = parser.add_mutually_exclusive_group()
+    endpoints.add_argument("--endpoint", type=Path, help="raw agent for runtimes already providing Java")
+    endpoints.add_argument("--endpoint-bundle", type=Path, help="complete bundled Frida agent with sidecar manifest")
     parser.add_argument("--stage-only", action="store_true", help="upload and verify, but do not restart the OEM host")
     parser.add_argument(
         "--execute-cold-restart",
@@ -502,11 +706,13 @@ def main() -> int:
     if not args.stage_only and not args.execute_cold_restart:
         print("Refusing live run without --execute-cold-restart", file=sys.stderr)
         return 64
+    defaults = default_inputs()
     inputs = Inputs(
         bridge=args.bridge.resolve(),
         interceptor=args.interceptor.resolve(),
         profile=args.profile.resolve(),
-        endpoint=args.endpoint.resolve(),
+        endpoint=(args.endpoint_bundle or args.endpoint or defaults.endpoint).resolve(),
+        endpoint_is_bundle=args.endpoint is None,
     )
     for path in (inputs.bridge, inputs.interceptor, inputs.profile, inputs.endpoint):
         if not path.is_file():

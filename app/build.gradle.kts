@@ -136,6 +136,10 @@ android {
     sourceSets {
         getByName("debug") {
             java.srcDir("src/internalDebug/java")
+            assets.srcDir(layout.buildDirectory.dir("generated/carplayBridgeAssets/debug").get().asFile)
+        }
+        getByName("release") {
+            assets.srcDir(layout.buildDirectory.dir("generated/carplayBridgeAssets/release").get().asFile)
         }
         getByName("leanDebug") {
             java.srcDir("src/internalDebug/java")
@@ -231,4 +235,68 @@ val testCarPlayColdTools by tasks.registering(Exec::class) {
         "scripts/carplay-patches/test_patch_cold_start_gate.py",
         "scripts/carplay-native-analysis/test_make_cold_launcher.py"
     )
+}
+
+// The persistent bridge is compiled only on the authorized build host. It is
+// packaged as an OEM-side asset and is never loaded as an Impulse JNI library.
+val carPlayAgentDirectory = rootProject.layout.projectDirectory.dir("scripts/carplay-native-analysis/agent")
+val installCarPlayAgentDependencies by tasks.registering(Exec::class) {
+    inputs.files(carPlayAgentDirectory.file("package.json"), carPlayAgentDirectory.file("package-lock.json"))
+    outputs.dir(carPlayAgentDirectory.dir("node_modules"))
+    commandLine(
+        "npm", "ci", "--prefix", carPlayAgentDirectory.asFile.absolutePath,
+        "--ignore-scripts", "--no-audit", "--no-fund"
+    )
+}
+
+// AGP names Release's native configuration RelWithDebInfo (and Debug's Debug).
+mapOf("Debug" to "Debug", "Release" to "RelWithDebInfo").forEach { (buildType, nativeConfig) ->
+    val lower = buildType.lowercase()
+    val generated = layout.buildDirectory.dir("generated/carplayBridgeAssets/$lower")
+    val generate = tasks.register<Exec>("generateCarPlayBridgeAssets$buildType") {
+        dependsOn(installCarPlayAgentDependencies)
+        dependsOn(tasks.matching { it.name.startsWith("buildCMake$nativeConfig[") })
+        inputs.files(rootProject.fileTree("scripts/carplay-native-analysis") {
+            include("*.py", "*.js", "testdata/*.json", "agent/package.json", "agent/package-lock.json")
+        })
+        inputs.file(layout.projectDirectory.file("src/main/res/raw/fridainject"))
+        inputs.files(fileTree(layout.projectDirectory.dir("src/main/java/br/com/redesurftank/havalshisuku")) {
+            include(
+                "managers/CarPlayBridgeBootstrapManager.kt",
+                "managers/CarPlayBridgeQuiescence.kt",
+                "managers/CarPlayBluetoothQuiescence.kt",
+                "managers/CarPlayQuiescenceReading.kt",
+                "experimental/CarPlayBootstrapRoot.kt",
+                "experimental/CarPlayBridgeBootstrapPolicy.kt",
+                "experimental/CarPlaySafetyPublicationGate.kt",
+                "experimental/CarPlayResidentProof.kt",
+                "experimental/CarPlayProjectionVisibilityProbe.kt"
+            )
+        })
+        inputs.files(fileTree(layout.buildDirectory.dir("intermediates/cxx/$nativeConfig")) {
+            include("**/obj/arm64-v8a/libcarplay_video_bridge.so")
+        })
+        inputs.property("versionCode", appVersionCode)
+        outputs.dir(generated)
+        workingDir(rootProject.layout.projectDirectory)
+        doFirst {
+            val candidates = fileTree(layout.buildDirectory.dir("intermediates/cxx/$nativeConfig")) {
+                include("**/obj/arm64-v8a/libcarplay_video_bridge.so")
+            }.files.sortedBy { it.absolutePath }
+            check(candidates.size == 1) {
+                "Expected one authorized-host $buildType ARM64 bridge, found ${candidates.size}"
+            }
+            generated.get().dir("carplay_bridge").asFile.deleteRecursively()
+            commandLine(
+                "python3", "scripts/carplay-native-analysis/build_persistent_carplay_assets.py",
+                "--native-lib", candidates.single().absolutePath,
+                "--output", generated.get().asFile.absolutePath,
+                "--version-code", appVersionCode.get().toString()
+            )
+        }
+    }
+    tasks.matching {
+        it.name == "merge${buildType}Assets" ||
+            (it.name.contains(buildType) && it.name.contains("lint", ignoreCase = true))
+    }.configureEach { dependsOn(generate) }
 }

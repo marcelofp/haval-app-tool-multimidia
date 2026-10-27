@@ -28,3 +28,6 @@
 -keep class br.com.redesurftank.havalshisuku.services.ICarPlayClusterBridge { *; }
 -keep class br.com.redesurftank.havalshisuku.services.ICarPlayClusterBridge$Stub { *; }
 -keep class br.com.redesurftank.havalshisuku.services.ICarPlayClusterBridge$Stub$Proxy { *; }
+
+# OEM Bundles contain this original Parcelable class name on the wire.
+-keep class ts.car.dcm.common.data.ConnDevice { *; }

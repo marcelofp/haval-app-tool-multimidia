@@ -1,10 +1,37 @@
 # Experimental CarPlay text on the native HUD
 
+## Current field result — 145, 2026-10-27
+
+The owner saw no native-HUD text during the five-minute Apple Maps test. Capture
+completed with 265 callbacks, no errors/drops and 244 text-eligible state-1 payloads.
+The native window existed on display4096, layoutAR and navigation enabled. This
+proves reception and window creation, not an active policy publication or frame.
+
+Source review identifies a possible suppression path: when the Autolink command
+Binder has never been bound and no positive AA evidence exists, the passive poll
+may return null continuously. The HUD requires a fresh explicit AA-inactive
+observation, so valid CarPlay text remains suppressed in that case. The actual
+policy fields were not recorded during this test; do not claim that path as the
+established field cause. AA subsequently became active after the CarPlay test,
+so the later Binder/stream snapshot cannot establish its state during the test.
+
+There is also a confirmed rendering gap: CarPlay text-only bypasses AR geometry
+and uses HERO/FAR, whose renderers draw distance but do not draw the street name.
+That gap alone does not explain a completely absent distance. The preliminary,
+unpublished v9-only146 did not change these paths. The corrected146 uses a pinned
+passive observer, a dedicated text renderer and bounded private publication/frame
+diagnostics, as described in [the correction](carplay-146-output-readiness.md).
+Physical validation remains pending; the original field cause is not uniquely proven.
+
 ## Scope
 
 Preparation on private 74126, retaining 74125 HEV/readability fixes and all AA JSON,
 cluster transport, assets and theme contracts. This is native HUD text only, not clean
 map video, not a new directions publisher and not Apple Maps identity detection.
+The existing native HUD is physical display 4096 (windshield), explicitly separate
+from cluster display 3. This code does NOT display CarPlay guidance on the cluster.
+That distinction was communicated before publication; the user explicitly chose to
+receive 74127 for a windshield-HUD test. Cluster integration remains a separate task.
 The TS callback contains no navigation-app identifier. Apple Maps delivered active
 payloads in two vehicle sessions; Waze alone only inactive defaults in both tests.
 
@@ -79,8 +106,10 @@ all non-active states, arrival with stale fields, known/unknown units, localized
 preservation, no inferred arrow/ETA, AA full-field priority, unknown/active/stale/future
 AA availability, independent AA/data expiry boundaries, long-sleep recomputation,
 binding/capture generation isolation, new-session reset, off/on fresh-input requirement,
-rebinding cleanup and defensive lane copies. Unit/build execution is pending the
-authorized immutable-commit Mac Mini workflow; no live test of this new code is claimed.
+rebinding cleanup and defensive lane copies. Mac Mini release/R8/lint vital passed
+for immutable commit 3fc8ce4f203655f7e0fb0128199793a6aed6b558; 826 tests,
+zero failures/errors, one skipped, including all 14 new policy tests. No live
+navigation test of this new code is claimed.
 
 After signed build and parked installation: keep AA route off, select the desired native
 HUD manually, start diagnostics, enable experiment, then start Apple Maps. Check street/

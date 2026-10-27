@@ -11,8 +11,6 @@ import android.view.ViewTreeObserver;
 import android.widget.FrameLayout;
 
 import br.com.redesurftank.havalshisuku.managers.AndroidAutoClusterController;
-import br.com.redesurftank.havalshisuku.managers.CarPlayDisplayOrchestrator;
-import br.com.redesurftank.havalshisuku.managers.CarPlayDisplayState;
 
 public final class CarPlaySecondaryClusterHost implements AutoCloseable {
     public enum Failure { POLICY_DENIED, START_FAILED, CONSUMER_FAILURE }
@@ -121,6 +119,33 @@ public final class CarPlaySecondaryClusterHost implements AutoCloseable {
         if (started && !closing && !allowed()) { deny(); }
     }
 
+    public boolean hasStartedConsumer() { return started; }
+
+    public CarPlayClusterHostPolicy.Reason eligibilityReason() {
+        return eligibilityReason(slot, consumer, snapshots);
+    }
+
+    /** Cheap UI checks and a cached immutable observation only; never reads ActivityManager. */
+    public static CarPlayClusterHostPolicy.Reason eligibilityReason(FrameLayout slot, View consumer,
+                                                                   SnapshotProvider snapshots) {
+        if (consumer == null ? slot.getChildCount() != 0 :
+                slot.getChildCount() != 1 || slot.getChildAt(0) != consumer) {
+            return CarPlayClusterHostPolicy.Reason.SLOT_OCCUPIED;
+        }
+        if (!slot.isAttachedToWindow()) return CarPlayClusterHostPolicy.Reason.SLOT_DETACHED;
+        if (slot.getDisplay() == null || slot.getDisplay().getDisplayId() != 3) {
+            return CarPlayClusterHostPolicy.Reason.WRONG_DISPLAY;
+        }
+        if (!slot.isHardwareAccelerated()) return CarPlayClusterHostPolicy.Reason.SLOT_NOT_ACCELERATED;
+        if (!slot.isShown()) return CarPlayClusterHostPolicy.Reason.SLOT_HIDDEN;
+        if (slot.getWidth() <= 0 || slot.getHeight() <= 0) return CarPlayClusterHostPolicy.Reason.SLOT_NOT_LAID_OUT;
+        if (slot.getWidth() > 4096 || slot.getHeight() > 2160) return CarPlayClusterHostPolicy.Reason.SLOT_SIZE_INVALID;
+        if (AndroidAutoClusterController.INSTANCE.isSessionActive()) return CarPlayClusterHostPolicy.Reason.AA_SESSION_ACTIVE;
+        if (AndroidAutoClusterController.INSTANCE.isSurfaceAttached()) return CarPlayClusterHostPolicy.Reason.AA_SURFACE_ATTACHED;
+        try { return CarPlayClusterHostPolicy.reason(snapshots.current(), SystemClock.elapsedRealtime()); }
+        catch (RuntimeException failure) { return CarPlayClusterHostPolicy.Reason.SNAPSHOT_ERROR; }
+    }
+
     public void retryRetirement() {
         requireMain();
         if (closing && consumer != null && !retirementComplete) { consumer.retryRetirement(); }
@@ -151,21 +176,7 @@ public final class CarPlaySecondaryClusterHost implements AutoCloseable {
     }
 
     private boolean allowed() {
-        if (consumer == null ? slot.getChildCount() != 0 :
-                slot.getChildCount() != 1 || slot.getChildAt(0) != consumer) { return false; }
-        if (!slot.isAttachedToWindow() || slot.getDisplay() == null || slot.getDisplay().getDisplayId() != 3 ||
-                !slot.isHardwareAccelerated() || !slot.isShown() ||
-                slot.getWidth() <= 0 || slot.getHeight() <= 0 || slot.getWidth() > 4096 || slot.getHeight() > 2160) {
-            return false;
-        }
-        if (AndroidAutoClusterController.INSTANCE.isSessionActive() ||
-                AndroidAutoClusterController.INSTANCE.isClusterRequested() ||
-                AndroidAutoClusterController.INSTANCE.isSurfaceAttached() ||
-                CarPlayDisplayOrchestrator.INSTANCE.getCurrentState() != CarPlayDisplayState.CONNECTED_ON_D0) {
-            return false;
-        }
-        try { return CarPlayClusterHostPolicy.allows(snapshots.current(), SystemClock.elapsedRealtime()); }
-        catch (RuntimeException failure) { return false; }
+        return eligibilityReason() == CarPlayClusterHostPolicy.Reason.ALLOWED;
     }
 
     private void deny() {

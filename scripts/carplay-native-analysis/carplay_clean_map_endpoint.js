@@ -9,7 +9,10 @@ const state = {
     binding: false,
     app: null,
     endpoint: null,
+    pendingEndpoint: null,
     connection: null,
+    bindingAttempt: null,
+    nextBindingId: 0,
     receiver: null,
     token: null,
     bridge: null,
@@ -37,18 +40,26 @@ function retire() {
         clearTimeout(state.timer);
         state.timer = null;
     }
-    if (state.endpoint !== null) {
-        try { state.endpoint.close(); } catch (_) {}
-        state.endpoint = null;
-    }
-    if (state.connection !== null && state.app !== null) {
-        try { state.app.unbindService(state.connection); } catch (_) {}
-    }
+    const endpoint = state.endpoint;
+    const pendingEndpoint = state.pendingEndpoint;
+    const connection = state.connection;
+    state.endpoint = null;
+    state.pendingEndpoint = null;
     state.connection = null;
+    state.bindingAttempt = null;
     state.binding = false;
     clearBytes(state.token);
     state.token = null;
     state.generation = 0;
+    if (endpoint !== null) {
+        try { endpoint.close(); } catch (_) {}
+    }
+    if (pendingEndpoint !== null && pendingEndpoint !== endpoint) {
+        try { pendingEndpoint.close(); } catch (_) {}
+    }
+    if (connection !== null && state.app !== null) {
+        try { state.app.unbindService(connection); } catch (_) {}
+    }
 }
 
 function scheduleAttempt() {
@@ -61,53 +72,84 @@ function scheduleAttempt() {
 
 function attemptOffer() {
     if (!state.requested || state.binding || state.endpoint !== null) return;
-    const epoch = Number(state.bridge.epoch());
-    if (!Number.isSafeInteger(epoch) || epoch <= 0) {
-        scheduleAttempt();
-        return;
-    }
-    const ByteArray = Java.use('[B');
-    const SecureRandom = Java.use('java.security.SecureRandom');
-    const Intent = Java.use('android.content.Intent');
-    const ServiceConnection = Java.use('android.content.ServiceConnection');
-    const token = ByteArray.$new(32);
-    SecureRandom.$new().nextBytes(token);
-    const endpoint = state.endpointClass.$new(state.appUid, token);
-    const generation = epoch;
-    const connection = Java.registerClass({
-        name: 'com.ts.carplay.ImpulseCleanMapConnection' + String(Date.now()),
-        implements: [ServiceConnection],
-        methods: {
-            onServiceConnected(name, binder) {
-                try {
-                    if (!state.requested || state.connection !== this) return;
-                    const remote = state.bridgeStub.asInterface(binder);
-                    requireValue(remote !== null, 'Impulse bridge returned null interface');
-                    remote.offerEndpoint(endpoint, token, generation);
-                    state.endpoint = endpoint;
-                    state.generation = generation;
-                    clearBytes(token);
-                    state.token = null;
-                    send({ type: 'clean-map-endpoint', state: 'offered', generation: generation });
-                } catch (error) {
-                    send({ type: 'clean-map-endpoint', state: 'offer-failed', error: String(error) });
-                    retire();
-                }
-            },
-            onServiceDisconnected(name) { retire(); },
-            onBindingDied(name) { retire(); },
-            onNullBinding(name) { retire(); }
+    try {
+        const epoch = Number(state.bridge.epoch());
+        if (!Number.isSafeInteger(epoch) || epoch <= 0) {
+            scheduleAttempt();
+            return;
         }
-    }).$new();
-    state.binding = true;
-    state.connection = connection;
-    state.token = token;
-    const intent = Intent.$new();
-    intent.setClassName('br.com.redesurftank.havalshisuku',
-        'br.com.redesurftank.havalshisuku.services.CarPlayClusterBridgeService');
-    if (!state.app.bindService(intent, connection, 1)) {
+        const SecureRandom = Java.use('java.security.SecureRandom');
+        const Intent = Java.use('android.content.Intent');
+        const ServiceConnection = Java.use('android.content.ServiceConnection');
+        const token = Java.array('byte', Array(32).fill(0));
+        state.token = token;
+        SecureRandom.$new().nextBytes(token);
+        const endpoint = state.endpointClass.$new(state.appUid, token);
+        state.pendingEndpoint = endpoint;
+        const generation = epoch;
+        // Java callbacks can wrap the same receiver in another JS object. Bind
+        // admission to this attempt's opaque identity, not callback `this`.
+        const attempt = {};
+        state.bindingAttempt = attempt;
+        const current = () => state.requested && state.bindingAttempt === attempt;
+        const disconnected = () => { if (current()) retire(); };
+        const connection = Java.registerClass({
+            name: 'com.ts.carplay.ImpulseCleanMapConnection' + String(++state.nextBindingId),
+            implements: [ServiceConnection],
+            methods: {
+                onServiceConnected: {
+                    returnType: 'void',
+                    argumentTypes: ['android.content.ComponentName', 'android.os.IBinder'],
+                    implementation(name, binder) {
+                        try {
+                            if (!current() || !state.binding || state.pendingEndpoint !== endpoint) return;
+                            requireValue(Number(state.bridge.epoch()) === generation, 'Principal generation changed before offer');
+                            const remote = state.bridgeStub.asInterface(binder);
+                            requireValue(remote !== null, 'Impulse bridge returned null interface');
+                            remote.offerEndpoint(endpoint, token, generation);
+                            if (!current()) return;
+                            state.endpoint = endpoint;
+                            state.pendingEndpoint = null;
+                            state.binding = false;
+                            state.generation = generation;
+                            clearBytes(token);
+                            state.token = null;
+                            send({ type: 'clean-map-endpoint', state: 'offered', generation: generation });
+                        } catch (error) {
+                            send({ type: 'clean-map-endpoint', state: 'offer-failed', error: String(error) });
+                            if (current()) retire();
+                        }
+                    }
+                },
+                onServiceDisconnected: {
+                    returnType: 'void',
+                    argumentTypes: ['android.content.ComponentName'],
+                    implementation: disconnected
+                },
+                onBindingDied: {
+                    returnType: 'void',
+                    argumentTypes: ['android.content.ComponentName'],
+                    implementation: disconnected
+                },
+                onNullBinding: {
+                    returnType: 'void',
+                    argumentTypes: ['android.content.ComponentName'],
+                    implementation: disconnected
+                }
+            }
+        }).$new();
+        state.binding = true;
+        state.connection = connection;
+        const intent = Intent.$new();
+        intent.setClassName('br.com.redesurftank.havalshisuku',
+            'br.com.redesurftank.havalshisuku.services.CarPlayClusterBridgeService');
+        if (!state.app.bindService(intent, connection, 1)) {
+            retire();
+            send({ type: 'clean-map-endpoint', state: 'bind-rejected' });
+        }
+    } catch (error) {
+        send({ type: 'clean-map-endpoint', state: 'offer-failed', error: String(error) });
         retire();
-        send({ type: 'clean-map-endpoint', state: 'bind-rejected' });
     }
 }
 
@@ -115,6 +157,7 @@ rpc.exports = {
     arm(options) {
         if (state.armed) throw new Error('Clean-map endpoint already armed');
         requireValue(options && typeof options.bridgePath === 'string', 'Exact bridge path required');
+        requireValue(typeof Java !== 'undefined', 'Java bridge unavailable; use the bundled Frida agent');
         return new Promise((resolve, reject) => Java.perform(() => {
             try {
                 const ActivityThread = Java.use('android.app.ActivityThread');
@@ -146,13 +189,19 @@ rpc.exports = {
                     name: 'com.ts.carplay.ImpulseCleanMapReceiver',
                     superClass: BroadcastReceiver,
                     methods: {
-                        onReceive(context, intent) {
-                            const action = String(intent.getAction());
-                            if (action === 'br.com.redesurftank.havalshisuku.CARPLAY_CLEAN_MAP_REQUEST') {
-                                state.requested = true;
-                                attemptOffer();
-                            } else if (action === 'br.com.redesurftank.havalshisuku.CARPLAY_CLEAN_MAP_REVOKE') {
-                                retire();
+                        // registerClass only infers signatures from interfaces,
+                        // never from BroadcastReceiver's abstract superclass.
+                        onReceive: {
+                            returnType: 'void',
+                            argumentTypes: ['android.content.Context', 'android.content.Intent'],
+                            implementation(context, intent) {
+                                const action = String(intent.getAction());
+                                if (action === 'br.com.redesurftank.havalshisuku.CARPLAY_CLEAN_MAP_REQUEST') {
+                                    state.requested = true;
+                                    attemptOffer();
+                                } else if (action === 'br.com.redesurftank.havalshisuku.CARPLAY_CLEAN_MAP_REVOKE') {
+                                    retire();
+                                }
                             }
                         }
                     }
