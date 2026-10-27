@@ -148,6 +148,9 @@ object HudArArrow {
     const val MAP_FAR_M = 700f
     /** Screen row of the car (0 m ahead). Above [BOTTOM], so the road isn't cut by the optics' edge. */
     const val MAP_NEAR_Y = 184f
+    /** A street is under the route when this many of its points share the route's grid cells (metres). */
+    const val MAP_ON_ROUTE_M = 3f
+    const val MAP_ON_ROUTE_PTS = 5
     /** The route drawn this far behind the car: past the HUD's bottom (y 200 is ~11 m back), like the roads. */
     const val MAP_BEHIND_M = 12f
     /**
@@ -278,9 +281,32 @@ object HudArArrow {
         val rawRoute = metres(route)
         val align = egoAlign(rawRoute)
         fun W.placed() = align?.let { ego(it) } ?: this
-        val gray = ArrayList<List<Pt>>()
-        for (road in roads) gray += mapRibbon(metres(road.pts).map { it.placed() }, MAP_HALF_M * road.width, MAP_MIN_PX * road.width, horizon)
         val ahead = rawRoute.map { it.placed() }.filter { it.z <= MAP_FAR_M }
+        // The streets the route runs on are drawn as wide as the blue (owner, 2026-10-27: an
+        // avenue showed wider than the route, a ramp narrower); the others keep their class.
+        // A street is under the route when [MAP_ON_ROUTE_PTS] of its points (~20 m) lie on it, so
+        // a cross street (a few points) keeps its own width. Looked up in a grid of the route.
+        val cells = HashSet<Long>()
+        fun cell(x: Float, z: Float) = (Math.floorDiv(x.toInt(), MAP_ON_ROUTE_M.toInt()).toLong() shl 32) xor
+            (Math.floorDiv(z.toInt(), MAP_ON_ROUTE_M.toInt()).toLong() and 0xffffffffL)
+        // The route every ~1 m, each cell and its neighbours: ~3-6 m either side of it.
+        for (i in 0 until ahead.size - 1) {
+            val a0 = ahead[i]
+            val a1 = ahead[i + 1]
+            val n = maxOf(1, hypot(a1.x - a0.x, a1.z - a0.z).toInt())
+            for (k in 0..n) {
+                val x = a0.x + (a1.x - a0.x) * k / n
+                val z = a0.z + (a1.z - a0.z) * k / n
+                for (dx in -1..1) for (dz in -1..1) cells += cell(x + dx * MAP_ON_ROUTE_M, z + dz * MAP_ON_ROUTE_M)
+            }
+        }
+        val gray = ArrayList<List<Pt>>()
+        for (road in roads) {
+            val pts = metres(road.pts).map { it.placed() }
+            val under = pts.count { cell(it.x, it.z) in cells } >= MAP_ON_ROUTE_PTS
+            val w = if (under) 1f else road.width
+            gray += mapRibbon(pts, MAP_HALF_M * w, MAP_MIN_PX * w, horizon)
+        }
         // The route starts at the car, [MAP_NEAR_Y] above the HUD's bottom, while the grey roads
         // run on behind it to the edge: carry it back [MAP_BEHIND_M] the way it starts, so both
         // reach the bottom and fade there together (owner, 2026-10-26).

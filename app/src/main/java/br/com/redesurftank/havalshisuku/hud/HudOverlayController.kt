@@ -273,6 +273,51 @@ object HudOverlayController {
 
     private fun currentFrame(): HudOverlayModel.Frame {
         trackRoundabout()
+        return buildFrame().also { trace(it) }
+    }
+
+    private var traceAtMs = 0L
+
+    /**
+     * Drive trace (owner, 2026-10-27): once a second while Android Auto navigates on the map,
+     * where the map put the car and what it drew, so a drive can be replayed on the car's own
+     * OSM cache (the 2026-10-27 left turns drawn to the right near the beach couldn't be).
+     */
+    private fun trace(frame: HudOverlayModel.Frame) {
+        val dirs = navDirections ?: return
+        if (!dirs.active || demoDirections != null || demoMapStartMs != 0L || HudMapFeed.poseLat.isNaN()) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - traceAtMs < TRACE_EVERY_MS) return
+        traceAtMs = now
+        val tbt = frame.tbt
+        val route = tbt?.route
+        fun r(v: Double, d: Int) = "%.${d}f".format(java.util.Locale.US, v)
+        fun r(v: Float, d: Int) = r(v.toDouble(), d)
+        val end = route?.takeIf { it.size >= 2 }?.let { "${r(it[it.size - 2], 0)},${r(it[it.size - 1], 0)}" }
+        ClusterPersistentEventLogger.log(
+            "hud_trace",
+            mapOf(
+                "lat" to r(HudMapFeed.poseLat, 6),
+                "lon" to r(HudMapFeed.poseLon, 6),
+                "hdg" to r(HudMapFeed.poseHeading, 0),
+                "gps_hdg" to r(HudMapFeed.gpsBearing, 0),
+                "kmh" to r(HudMapFeed.gpsSpeedMps() * 3.6f, 0),
+                "fix_ms" to HudMapFeed.fixAgeMs(),
+                "turn" to dirs.turn,
+                "aa_m" to dirs.distanceM,
+                "ar_m" to tbt?.arMeters?.let { r(it, 0) },
+                "street" to dirs.street.take(28).replace(' ', '_'),
+                "rb" to dirs.exitNumber?.let { "${it}/${dirs.turnAngle}" },
+                "roads" to HudMapFeed.lines.size,
+                "matched" to tbt?.routeMatched,
+                "clear" to tbt?.routeClear,
+                "pts" to route?.let { it.size / 2 },
+                "end" to end
+            )
+        )
+    }
+
+    private fun buildFrame(): HudOverlayModel.Frame {
         return HudOverlayModel.frameFor(
             config = config(),
             directions = demoDirections ?: navDirections,
@@ -294,6 +339,9 @@ object HudOverlayController {
             scriptedDemo = demoDriveStartMs != 0L
         )
     }
+
+    /** [trace] period. */
+    private val TRACE_EVERY_MS = 1_000L
 
     /** Roundabout progress from AA's own countdown to the exit (see [RoundaboutTracker]). */
     private val rbTracker = RoundaboutTracker()

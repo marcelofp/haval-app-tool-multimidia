@@ -95,6 +95,21 @@ object HudMapFeed {
     private var aheadFromLat = Double.NaN
     private var aheadFromLon = Double.NaN
 
+    /**
+     * Where the last drawn map put the car (the fix run on at its speed, the heading after the
+     * street snap) and the raw GPS speed (m/s) and fix age: for the drive trace (hud_trace).
+     */
+    @Volatile var poseLat = Double.NaN
+        private set
+    @Volatile var poseLon = Double.NaN
+        private set
+    @Volatile var poseHeading = Double.NaN
+        private set
+    @Volatile var gpsBearing = Double.NaN
+        private set
+    fun gpsSpeedMps(): Float = speedMps
+    fun fixAgeMs(): Long = if (fixAtMs == 0L) -1L else SystemClock.elapsedRealtime() - fixAtMs
+
     /** Share (0..1) of the tiles round the car that are loaded, for the HUD's loading bar. */
     @Volatile var progress = 0f
         private set
@@ -297,6 +312,10 @@ object HudMapFeed {
             val (dLat, dLon, dHeading) = demoPose(run, now)
             pLat = dLat; pLon = dLon; heading = dHeading
         }
+        poseLat = pLat
+        poseLon = pLon
+        poseHeading = heading
+        gpsBearing = bearing
         lines = OsmRoads.toLocal(near.roads, pLat, pLon, heading, AHEAD_M, SIDE_M, STEP_M)
         onChange?.invoke()
     }
