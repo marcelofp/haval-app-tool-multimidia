@@ -406,20 +406,19 @@ enum class SharedPreferencesKeys(val key: String, val description: String) {
             "aaClusterServiceAutoMount",
             "Montar o Service do mapa do cluster ao ligar"
     ),
-    // Impulse overlay on the physical HUD (display 4096). Layout "original" (default) draws
-    // nothing; "navigation" = AA turn-by-turn + power/RPM bars, each part switchable below
-    // (all on by default). Read through HudOverlaySettings.
-    HUD_LAYOUT("hudLayout", "Layout do HUD"),
+    // Impulse overlay on the physical HUD (display 4096). The style picked in Telas (original,
+    // custom, map, basic, discreet; Original draws nothing). Only "Personalizado" (custom) saves
+    // its options, in the HUD_* keys below; it exists while HUD_CUSTOM_BASE is set. Read through
+    // HudOverlaySettings.
+    HUD_PRESET("hudPreset", "Estilo do HUD (original, custom, map, basic, discreet)"),
+    HUD_CUSTOM_BASE("hudCustomBase", "HUD Personalizado: estilo de origem (map, basic, discreet)"),
+    HUD_LAYOUT("hudLayout", "HUD Personalizado: visual da manobra (navigation = seta, ar = mapa 3D)"),
     HUD_NAV_ENABLED("hudNavEnabled", "HUD: mostrar navegação do Android Auto"),
     HUD_NAV_SMALL_WHEN_FAR("hudNavSmallWhenFar", "HUD: seta menor até faltar 1 km"),
     HUD_NAV_TRIP("hudNavTrip", "HUD: mostrar distância e tempo restantes"),
     HUD_POWER_BAR("hudPowerBar", "HUD: barra de potência/regeneração"),
     HUD_RPM_BAR("hudRpmBar", "HUD: barra de rotação do motor"),
-    HUD_NAV_ARCS("hudNavArcs", "HUD Navegação: potência/rotação em arcos (senão barras)"),
-    HUD_AR_ARCS("hudArArcs", "HUD Navegação AR: potência/rotação em arcos (senão barras)"),
-    // Replace the two above (read as a fallback): none | bars | arcs, per layout.
-    HUD_NAV_GAUGES("hudNavGauges", "HUD Navegação: indicadores de potência/RPM (none, bars, arcs)"),
-    HUD_AR_GAUGES("hudArGauges", "HUD Navegação AR: indicadores de potência/RPM (none, bars, arcs)"),
+    HUD_GAUGES("hudGauges", "HUD: indicadores de potência/RPM (none, bars, arcs)"),
     HUD_AR_CHEVRONS("hudArChevrons", "HUD Navegação AR: setas animadas acima da velocidade perto da curva"),
     HUD_AR_CHEVRONS_ALWAYS("hudArChevronsAlways", "HUD: uma seta parada junto aos arcos a qualquer distância, para o lado da próxima rua"),
     HUD_CHEVRONS_EVEN_HIDDEN("hudChevronsEvenHidden", "HUD: a seta de direção parada aparece mesmo com a próxima manobra oculta"),
@@ -436,7 +435,6 @@ enum class SharedPreferencesKeys(val key: String, val description: String) {
     HUD_COLOR_STREET("hudColorStreet", "HUD: cor das ruas do mapa"),
     HUD_COLOR_ROUTE("hudColorRoute", "HUD: cor da rota/seta do mapa"),
     HUD_COLOR_TEXT("hudColorText", "HUD: cor padrão do texto e ícones"),
-    HUD_COLOR_OPACITY("hudColorOpacity", "HUD: cores já salvas com opacidade (antes disso a rua era salva sólida)"),
     HUD_COLOR_CHEVRON("hudColorChevron", "HUD: cor da seta de direção (setas perto das curvas)"),
     // Alerta de radar (Recursos). Read through RadarSettings.
     // The theme's turn-by-turn card (owner, 2026-10-25). Off: the theme gets "no navigation";

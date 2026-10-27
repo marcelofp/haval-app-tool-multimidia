@@ -122,14 +122,15 @@ object HudOverlayController {
         }
     }
 
-    /** Telas tab: layout or one of its options changed (already saved). Any thread. */
+    /** Telas tab: style or one of Personalizado's options changed (already saved). Any thread. */
     fun setConfig(config: HudOverlayModel.Config) {
         main.post {
             configCache = config
             // The demo started from the settings keeps playing, so each change shows on it at
-            // once (owner, 2026-10-24: compare options live); its layout stays the one it was
-            // started for. Any other (debug) demo stops: the owner's pick wins.
-            if (demoDriveStartMs != 0L && demoLayout != null) {
+            // once (owner, 2026-10-24: compare options live): a change there makes Personalizado,
+            // which the demo now plays. Any other (debug) demo stops: the owner's pick wins.
+            if (demoDriveStartMs != 0L && demoConfig != null) {
+                demoConfig = config
                 publish()
                 return@post
             }
@@ -173,8 +174,8 @@ object HudOverlayController {
         return when {
             // The map demo: the AR theme with the map, whatever the owner picked.
             demoMapStartMs != 0L -> saved.copy(layout = HudOverlayModel.Layout.AR, mapStreets = true)
-            // Scripted drive: the layout chosen in Telas, or AR when started from adb.
-            demoDriveStartMs != 0L -> saved.copy(layout = demoLayout ?: HudOverlayModel.Layout.AR, navigation = true)
+            // Scripted drive: the style open in Telas, or AR when started from adb.
+            demoDriveStartMs != 0L -> (demoConfig ?: saved.copy(layout = HudOverlayModel.Layout.AR)).copy(navigation = true)
             // Static demos draw on "original" too; that layout now draws only the radar.
             demoDirections != null && !saved.active -> saved.copy(layout = HudOverlayModel.Layout.NAVIGATION)
             else -> saved
@@ -482,14 +483,27 @@ object HudOverlayController {
      * 4.8 km / 12 min to go. Shows even on the "original" layout, so it ends after [DEMO_TIMEOUT_MS] or as soon
      * as the layout is touched.
      */
-    /** Debug `--es hudMap on|off`: switch the map (saved, as the Telas option does). */
+    /**
+     * Debug `--es hudMap on|off`: the map's streets (off = the 3D arrows it falls back to, no
+     * longer a Telas option), saved into Personalizado.
+     */
     internal fun setMapDebug(on: Boolean) {
-        main.post { HudOverlaySettings.save(config().copy(mapStreets = on, layout = configCache?.layout ?: config().layout)) }
+        main.post { saveCustomDebug { it.copy(mapStreets = on) } }
     }
 
-    /** Debug `--es hudMapEdges on|off`: the map's streets as edge lines, saved like the Telas option. */
+    /** Debug `--es hudMapEdges on|off`: the map's streets as edge lines, saved into Personalizado. */
     internal fun setMapEdgesDebug(on: Boolean) {
-        main.post { HudOverlaySettings.save(HudOverlaySettings.load().copy(mapEdges = on)) }
+        main.post { saveCustomDebug { it.copy(mapEdges = on) } }
+    }
+
+    /** The shown style (Mapa 3D when it is Original) with [change], saved as Personalizado. */
+    private fun saveCustomDebug(change: (HudOverlayModel.Config) -> HudOverlayModel.Config) {
+        val prefs = HudOverlaySettings.prefs()
+        val preset = HudOverlaySettings.preset(prefs)
+        val base = preset.takeIf { it in HudOverlayModel.Preset.FIXED }
+            ?: HudOverlaySettings.customBase(prefs) ?: HudOverlayModel.Preset.MAP
+        val current = HudOverlaySettings.load(prefs).takeIf { it.active } ?: base.config!!
+        HudOverlaySettings.saveCustom(change(current), base, prefs)
     }
 
     internal fun demo(mode: String) {
@@ -509,7 +523,7 @@ object HudOverlayController {
         stopDemoDrive()
         stopDemoMap()
         if (mode == "drive") {
-            demoLayout = null
+            demoConfig = null
             startDemoDrive()
             return
         }
@@ -590,8 +604,8 @@ object HudOverlayController {
         main.postDelayed(demoMapTick, DEMO_DRIVE_TICK_MS)
     }
 
-    /** Layout the Telas button asked the scripted drive to use. Null keeps the adb default (AR). */
-    private var demoLayout: HudOverlayModel.Layout? = null
+    /** Options the Telas button asked the scripted drive to play. Null keeps the adb default (AR). */
+    private var demoConfig: HudOverlayModel.Config? = null
     private val demoUiListeners = java.util.concurrent.CopyOnWriteArrayList<(Boolean, Boolean) -> Unit>()
 
     /** True while the car's own speed is 0. The scripted demo must not start above that. */
@@ -616,17 +630,17 @@ object HudOverlayController {
     }
 
     /**
-     * Telas: start or stop the scripted drive in [layout]. Start is ignored while the car is moving.
-     * Any thread.
+     * Telas: start or stop the scripted drive with [config] (the style open in the settings).
+     * Start is ignored while the car is moving. Any thread.
      */
-    fun setDemoDrive(on: Boolean, layout: HudOverlayModel.Layout) {
+    fun setDemoDrive(on: Boolean, config: HudOverlayModel.Config) {
         main.post {
             if (on) {
                 if (speedKmh > 0.0) {
                     notifyDemoUi()
                     return@post
                 }
-                demoLayout = layout
+                demoConfig = config
                 stopDemoMap()
                 startDemoDrive()
             } else {
@@ -659,7 +673,7 @@ object HudOverlayController {
         if (demoDriveStartMs == 0L) return
         main.removeCallbacks(demoDriveTick)
         demoDriveStartMs = 0L
-        demoLayout = null
+        demoConfig = null
         demoDirections = null
         notifyDemoUi()
     }

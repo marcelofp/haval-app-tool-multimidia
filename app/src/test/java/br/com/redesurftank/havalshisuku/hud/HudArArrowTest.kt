@@ -250,31 +250,33 @@ class HudArArrowTest {
     }
 
     @Test
-    fun `AR frames use arcs, Navegação keeps the bars`() {
+    fun `one indicators choice for both maneuver visuals`() {
         val turn = Directions(active = true, distance = "90 m", distanceM = 90, turn = "TURN_RIGHT")
-        val ar = HudOverlayModel.Config(layout = HudOverlayModel.Layout.AR)
-        assertTrue(HudOverlayModel.frameFor(ar, turn, 30, 24).arcs)
-        assertTrue(!HudOverlayModel.frameFor(ar.copy(layout = HudOverlayModel.Layout.NAVIGATION), turn, 30, 24).arcs)
+        val arcs = HudOverlayModel.Config(layout = HudOverlayModel.Layout.AR, gauges = HudOverlayModel.Gauges.ARCS)
+        assertTrue(HudOverlayModel.frameFor(arcs, turn, 30, 24).arcs)
+        assertTrue(HudOverlayModel.frameFor(arcs.copy(layout = HudOverlayModel.Layout.NAVIGATION), turn, 30, 24).arcs)
+        assertTrue(!HudOverlayModel.frameFor(arcs.copy(gauges = HudOverlayModel.Gauges.BARS), turn, 30, 24).arcs)
+        // "Nenhum": no power, no RPM, whatever the two switches say.
+        val none = HudOverlayModel.frameFor(arcs.copy(gauges = HudOverlayModel.Gauges.NONE), turn, 30, 24)
+        assertNull(none.powerPercent)
+        assertNull(none.rpmTenths)
     }
 
     @Test
-    fun `each layout picks bars or arcs, Navegação bars and AR arcs by default`() {
-        val turn = Directions(active = true, distance = "90 m", distanceM = 90, turn = "TURN_RIGHT")
-        val nav = HudOverlayModel.Config(layout = HudOverlayModel.Layout.NAVIGATION)
-        val ar = HudOverlayModel.Config(layout = HudOverlayModel.Layout.AR)
-        assertTrue(!HudOverlayModel.frameFor(nav, turn, 30, 24).arcs)
-        assertTrue(HudOverlayModel.frameFor(ar, turn, 30, 24).arcs)
-        assertTrue(HudOverlayModel.frameFor(nav.copy(navGauges = HudOverlayModel.Gauges.ARCS), turn, 30, 24).arcs)
-        assertTrue(!HudOverlayModel.frameFor(ar.copy(arGauges = HudOverlayModel.Gauges.BARS), turn, 30, 24).arcs)
-        // One layout's choice doesn't touch the other's.
-        assertTrue(HudOverlayModel.frameFor(ar.copy(navGauges = HudOverlayModel.Gauges.BARS), turn, 30, 24).arcs)
-        assertTrue(!HudOverlayModel.frameFor(nav.copy(arGauges = HudOverlayModel.Gauges.BARS), turn, 30, 24).arcs)
-        // "Nenhum": no power, no RPM, whatever the two switches say.
-        val none = HudOverlayModel.frameFor(ar.copy(arGauges = HudOverlayModel.Gauges.NONE), turn, 30, 24)
-        assertNull(none.powerPercent)
-        assertNull(none.rpmTenths)
-        assertEquals(HudOverlayModel.Gauges.ARCS, nav.withGauges(HudOverlayModel.Layout.NAVIGATION, HudOverlayModel.Gauges.ARCS).navGauges)
-        assertEquals(HudOverlayModel.Gauges.ARCS, ar.withGauges(HudOverlayModel.Layout.NAVIGATION, HudOverlayModel.Gauges.ARCS).navGauges)
+    fun `styles - Mapa 3D always has the map, Navegação Básica the arrow, Discreto the least`() {
+        val map = HudOverlayModel.Preset.MAP.config!!
+        assertEquals(HudOverlayModel.Layout.AR, map.layout)
+        assertTrue(map.mapStreets && map.arcs)
+        val basic = HudOverlayModel.Preset.BASIC.config!!
+        assertEquals(HudOverlayModel.Layout.NAVIGATION, basic.layout)
+        assertEquals(HudOverlayModel.Gauges.BARS, basic.gauges)
+        val discreet = HudOverlayModel.Preset.DISCREET.config!!
+        assertEquals(HudOverlayModel.Gauges.NONE, discreet.gauges)
+        assertEquals(HudOverlayModel.ColorMode.BLUE, discreet.colors.mode)
+        assertTrue(!discreet.trip && discreet.showTurnFromM == 300)
+        assertTrue(!HudOverlayModel.Preset.ORIGINAL.config!!.active)
+        assertNull(HudOverlayModel.Preset.CUSTOM.config)
+        assertEquals(HudOverlayModel.Preset.MAP, HudOverlayModel.Preset.fromKey("map"))
     }
 
     @Test

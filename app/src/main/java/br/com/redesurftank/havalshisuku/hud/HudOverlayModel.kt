@@ -1220,9 +1220,8 @@ object HudOverlayModel {
         val trip: Boolean = true,
         val powerBar: Boolean = true,
         val rpmBar: Boolean = true,
-        /** Power/RPM indicators per layout: none, bottom bars, or arcs round the native speed. */
-        val navGauges: Gauges = Gauges.BARS,
-        val arGauges: Gauges = Gauges.ARCS,
+        /** Power/RPM indicators: none, bottom bars, or arcs round the native speed (one for every style). */
+        val gauges: Gauges = Gauges.BARS,
         /** AR: animated chevrons above the speed when close to a turn. */
         val chevrons: Boolean = true,
         /** ...and one still chevron by the arcs at any distance, pointing to the next road. */
@@ -1253,19 +1252,62 @@ object HudOverlayModel {
     ) {
         val active: Boolean get() = layout != Layout.ORIGINAL
 
-        /** Indicators for the current layout. */
-        val gauges: Gauges get() = when (layout) {
-            Layout.NAVIGATION -> navGauges
-            Layout.AR -> arGauges
-            Layout.ORIGINAL -> Gauges.NONE
+        /** Arcs round the speed. */
+        val arcs: Boolean get() = gauges == Gauges.ARCS
+    }
+
+    /**
+     * The HUD styles in Telas (owner, 2026-10-27): fixed sets of every option, plus the owner's
+     * own ([CUSTOM], "Personalizado"), made by changing any of them. The 3D arrows without the
+     * map are no longer offered: "Mapa 3D" always has the map (the arrows stay only as what it
+     * draws while the streets load or without internet).
+     */
+    enum class Preset(val key: String) {
+        ORIGINAL("original"),
+        CUSTOM("custom"),
+        MAP("map"),
+        BASIC("basic"),
+        DISCREET("discreet");
+
+        /** The style's options; null for [CUSTOM] (saved by the owner). */
+        val config: Config? get() = when (this) {
+            ORIGINAL -> Config(layout = Layout.ORIGINAL)
+            CUSTOM -> null
+            // The owner's car on 2026-10-27, made the map style.
+            MAP -> Config(
+                layout = Layout.AR,
+                gauges = Gauges.ARCS,
+                chevronsAlways = true,
+                chevronsEvenHidden = true,
+                mapStreets = true,
+                mapEdges = true,
+                iconStyle = IconStyle.GOOGLE,
+                colors = Colors(
+                    drive = COLOR_CHEVRON,
+                    rpm = rgb(0x83, 0x87, 0x8D),
+                    route = rgb(0x00, 0x34, 0xFF),
+                    chevron = rgb(0x47, 0x98, 0xDC)
+                )
+            )
+            // The old Navegação layout with its defaults.
+            BASIC -> Config(layout = Layout.NAVIGATION, gauges = Gauges.BARS)
+            // The least on the glass: the turn only from 300 m, no trip line, no indicators, all blue.
+            DISCREET -> Config(
+                layout = Layout.NAVIGATION,
+                trip = false,
+                gauges = Gauges.NONE,
+                showTurnFromM = 300,
+                iconStyle = IconStyle.GOOGLE,
+                colors = Colors(mode = ColorMode.BLUE)
+            )
         }
 
-        /** Arcs for the current layout. */
-        val arcs: Boolean get() = gauges == Gauges.ARCS
+        companion object {
+            fun fromKey(key: String?): Preset? = entries.firstOrNull { it.key == key }
 
-        /** This config with [layout]'s indicators set to [g]. */
-        fun withGauges(layout: Layout, g: Gauges): Config =
-            if (layout == Layout.AR) copy(arGauges = g) else copy(navGauges = g)
+            /** Styles with fixed options, in the Telas order (Personalizado goes after Original). */
+            val FIXED = listOf(MAP, BASIC, DISCREET)
+        }
     }
 
     /** Choices for [Config.showTurnFromM]: always, then 200 m .. 1 km. */
