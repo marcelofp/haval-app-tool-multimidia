@@ -46,7 +46,12 @@ object HudOverlaySettings {
         drive = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_DRIVE.key, d.drive),
         regen = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_REGEN.key, d.regen),
         rpm = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_RPM.key, d.rpm),
-        street = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_STREET.key, d.street),
+        // Saved before opacity existed (2026-10-26): the street was stored solid, it looked like the default.
+        street = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_STREET.key, d.street).let {
+            if (!prefs.getBoolean(SharedPreferencesKeys.HUD_COLOR_OPACITY.key, false) && HudOverlayModel.opacityOf(it) >= 1f)
+                HudOverlayModel.withOpacity(it, HudOverlayModel.STREET_DEFAULT_OPACITY)
+            else it
+        },
         route = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_ROUTE.key, d.route),
         text = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_TEXT.key, d.text),
         chevron = prefs.getInt(SharedPreferencesKeys.HUD_COLOR_CHEVRON.key, d.chevron)
@@ -92,6 +97,7 @@ object HudOverlaySettings {
             .putInt(SharedPreferencesKeys.HUD_COLOR_ROUTE.key, config.colors.route)
             .putInt(SharedPreferencesKeys.HUD_COLOR_TEXT.key, config.colors.text)
             .putInt(SharedPreferencesKeys.HUD_COLOR_CHEVRON.key, config.colors.chevron)
+            .putBoolean(SharedPreferencesKeys.HUD_COLOR_OPACITY.key, true)
             .remove(LEGACY_ENABLED_KEY)
             .apply()
         HudOverlayController.setConfig(config)

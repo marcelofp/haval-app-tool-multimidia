@@ -221,7 +221,7 @@ class HudOverlayRenderer {
             var d = phase - k.toFloat() / M.CHEVRON_COUNT
             d -= kotlin.math.floor(d)
             val pulse = (1f - d) * (1f - d) * (1f - d)
-            chevronPaint.alpha = (255 * appear * mark.appear * (base + (1f - base) * pulse)).toInt().coerceIn(0, 255)
+            chevronPaint.alpha = (255 * chevronOpacity * appear * mark.appear * (base + (1f - base) * pulse)).toInt().coerceIn(0, 255)
             placeChevron(canvas, mark, chevronPaint)
         }
     }
@@ -250,24 +250,39 @@ class HudOverlayRenderer {
      * The owner's colours (Cores tab) on the paints: text and icons keep each paint's own alpha;
      * the map's gradients are rebuilt.
      */
+    /** Each text paint's own alpha, before the owner's opacity multiplies it. */
+    private val baseAlpha = HashMap<Paint, Int>()
+    /** Opacities (0..1) where a paint's alpha is set while drawing. */
+    private var chevronOpacity = 1f
+    private var routeOpacity = 1f
+    /** The streets against their default opacity (1 = as they always were). */
+    private var streetGain = 1f
+
     private fun applyColors(c: M.Colors) {
         if (c == colors) return
         colors = c
         textColor = c.text
+        val textOpacity = M.opacityOf(c.text)
         for (p in listOf(
             fill, valuePaint, unitPaint, tripPaint, exitPaint, glyphPaint, laneOn, laneOff, divider, ringOn, ringOff,
             navTripPaint, flagFill, flagPole, flagOutline, streetPaint, radarLimit, radarBadge
-        )) p.color = (p.color and -0x1000000) or (c.text and 0xFFFFFF)
+        )) {
+            val a = baseAlpha.getOrPut(p) { p.alpha }
+            p.color = ((a * textOpacity).toInt().coerceIn(0, 255) shl 24) or (c.text and M.RGB_MASK)
+        }
         driveColor = c.drive
         regenColor = c.regen
         segDrive.color = c.drive
         segRegen.color = c.regen
         rpmColor = c.rpm
-        rpmOffColor = (Color.alpha(RPM_OFF) shl 24) or (c.rpm and 0xFFFFFF)
-        streetColor = c.street
+        rpmOffColor = ((Color.alpha(RPM_OFF) * M.opacityOf(c.rpm)).toInt() shl 24) or (c.rpm and M.RGB_MASK)
+        streetColor = c.street or M.ALPHA_MASK
+        streetGain = M.opacityOf(c.street) / M.STREET_DEFAULT_OPACITY
         routeNear = M.routeNear(c.route)
-        routeFar = c.route
-        chevronPaint.color = c.chevron
+        routeFar = c.route or M.ALPHA_MASK
+        routeOpacity = M.opacityOf(c.route)
+        chevronPaint.color = c.chevron or M.ALPHA_MASK
+        chevronOpacity = M.opacityOf(c.chevron)
         mapGrayShaders.clear()
         mapBlueShaders.clear()
         blueShaders.clear()
@@ -751,7 +766,7 @@ class HudOverlayRenderer {
         canvas.saveLayerAlpha(left, top, right, HudArArrow.BOTTOM, (opacity * 255).toInt())
         if (shape.gray.isNotEmpty()) {
             arPaint.shader = if (map) mapShader(top, blue = false) else shaderFor(grayShaders, top)
-            arPaint.alpha = ((if (map) MAP_ROAD_ALPHA else 140) * shape.grayAlpha).toInt().coerceIn(0, 255)
+            arPaint.alpha = ((if (map) MAP_ROAD_ALPHA else 140) * shape.grayAlpha * streetGain).toInt().coerceIn(0, 255)
             arPath.reset()
             for (ribbon in shape.gray) addRibbon(ribbon, top)
             if (map && tbt.mapEdges) {
@@ -761,7 +776,7 @@ class HudOverlayRenderer {
                 arPaint.style = Paint.Style.STROKE
                 arPaint.strokeWidth = MAP_EDGE_STROKE
                 arPaint.strokeJoin = Paint.Join.ROUND
-                arPaint.alpha = (MAP_EDGE_ALPHA * shape.grayAlpha).toInt().coerceIn(0, 255)
+                arPaint.alpha = (MAP_EDGE_ALPHA * shape.grayAlpha * streetGain).toInt().coerceIn(0, 255)
                 canvas.drawPath(arPath, arPaint)
                 arPaint.style = Paint.Style.FILL
                 canvas.drawPath(arPath, edgeCutPaint)
@@ -770,7 +785,7 @@ class HudOverlayRenderer {
             }
         }
         arPaint.shader = if (map) mapShader(top, blue = true) else shaderFor(blueShaders, top)
-        arPaint.alpha = 255
+        arPaint.alpha = (255 * routeOpacity).toInt().coerceIn(0, 255)
         arPath.reset()
         addRibbon(shape.blue, top)
         val h = shape.head
@@ -833,7 +848,11 @@ class HudOverlayRenderer {
             // The bottom fade is the same for streets and route, over the last few px (owner,
             // 2026-10-26: the grey reached the bottom while the blue faded, which looked odd).
             val ys = floatArrayOf(top, top + span * 0.32f, top + span * 0.58f, HudArArrow.BOTTOM - MAP_BOTTOM_FADE_PX, HudArArrow.BOTTOM)
-            val alphas = if (blue) floatArrayOf(0.08f, 0.4f, 0.85f, 1f, MAP_BOTTOM_FADE_TO) else floatArrayOf(0f, 0.12f, 0.45f, 0.85f, 0.85f * MAP_BOTTOM_FADE_TO)
+            // More solid streets than the default (owner's opacity): once their paint is at full,
+            // the gradient's own stops rise too; 0 at the top stays 0, so it still fades out.
+            val lift = if (blue) 1f else maxOf(1f, MAP_ROAD_ALPHA * streetGain / 255f)
+            val alphas = if (blue) floatArrayOf(0.08f, 0.4f, 0.85f, 1f, MAP_BOTTOM_FADE_TO)
+            else floatArrayOf(0f, 0.12f, 0.45f, 0.85f, 0.85f * MAP_BOTTOM_FADE_TO).map { (it * lift).coerceAtMost(1f) }.toFloatArray()
             val colors = IntArray(ys.size) { i ->
                 val c = if (blue) arRgb(ys[i]) else streetColor
                 Color.argb((alphas[i] * 255).toInt(), Color.red(c), Color.green(c), Color.blue(c))
@@ -884,7 +903,7 @@ class HudOverlayRenderer {
         val size = (flag.height * kotlin.math.sqrt(sx * sy) * AR_FLAG_SCALE).coerceIn(AR_FLAG_MIN, minOf(AR_FLAG_MAX, y - 40f))
         // The pennant flies away from the road: keep that side of it on the panel.
         val x = if (flag.pennant < 0) raw.coerceAtLeast(size * 0.7f) else raw.coerceAtMost(480f - size * 0.7f)
-        canvas.saveLayerAlpha(x - size, y - size - 2f, x + size, y + 2f, (255 * (AR_FLAG_ALPHA_MIN + AR_FLAG_ALPHA_SPAN * opacity)).toInt().coerceIn(0, 255))
+        canvas.saveLayerAlpha(x - size, y - size - 2f, x + size, y + 2f, (255 * routeOpacity * (AR_FLAG_ALPHA_MIN + AR_FLAG_ALPHA_SPAN * opacity)).toInt().coerceIn(0, 255))
         canvas.save()
         if (flag.pennant < 0) {
             canvas.translate(x, 0f)

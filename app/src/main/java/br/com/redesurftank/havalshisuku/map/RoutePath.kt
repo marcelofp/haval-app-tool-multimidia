@@ -9,8 +9,11 @@ import kotlin.math.min
 import kotlin.math.roundToLong
 import kotlin.math.sin
 
-/** A road in the car's frame (metres, x right, y ahead; x, y pairs) and its drawn width factor. */
-class LocalRoad(val pts: FloatArray, val width: Float, val name: String = "") {
+/**
+ * A road in the car's frame (metres, x right, y ahead; x, y pairs) and its drawn width factor.
+ * [oneway]: travel only in the order of [pts] (OSM's way direction). [ring]: a roundabout's ring.
+ */
+class LocalRoad(val pts: FloatArray, val width: Float, val name: String = "", val oneway: Boolean = false, val ring: Boolean = false) {
     /** Driveways, parking aisles: not counted as side streets. */
     val minor: Boolean get() = width < MINOR_WIDTH
 
@@ -61,12 +64,22 @@ object RoutePath {
         val next = ArrayList<Node>(3)
         /** Parallel to [next]: the way there is a minor road. */
         val minor = ArrayList<Boolean>(3)
+        /** Parallel to [next]: the way there runs against a one-way street (no way out there). */
+        val against = ArrayList<Boolean>(3)
+        /** Parallel to [next]: the way there is a roundabout's ring. */
+        val ring = ArrayList<Boolean>(3)
         /** Parallel to [next]: the street's name. */
         val names = ArrayList<String>(3)
 
-        fun link(n: Node, isMinor: Boolean, name: String) {
+        fun link(n: Node, isMinor: Boolean, name: String, isAgainst: Boolean = false, isRing: Boolean = false) {
             val i = next.indexOf(n)
-            if (i < 0) { next += n; minor += isMinor; names += name } else if (!isMinor) minor[i] = false
+            if (i < 0) {
+                next += n; minor += isMinor; names += name; against += isAgainst; ring += isRing
+            } else {
+                if (!isMinor) minor[i] = false
+                if (!isAgainst) against[i] = false
+                if (isRing) ring[i] = true
+            }
         }
     }
 
@@ -94,8 +107,8 @@ object RoutePath {
             for (k in 0 until nPts) {
                 val n = vertex(road.pts[2 * k], road.pts[2 * k + 1], end = k == 0 || k == nPts - 1)
                 if (prev != null && prev !== n) {
-                    prev.link(n, road.minor, road.name)
-                    n.link(prev, road.minor, road.name)
+                    prev.link(n, road.minor, road.name, isRing = road.ring)
+                    n.link(prev, road.minor, road.name, isAgainst = road.oneway, isRing = road.ring)
                 }
                 prev = n
             }
@@ -214,7 +227,9 @@ object RoutePath {
         val turnTo = turnDeg!!
         if (j > 0) {
             val inDeg = heading(path[j].x - path[j - 1].x, path[j].y - path[j - 1].y)
-            val exit = path[j].next.filter { it !== path[j - 1] }
+            // Not into a one-way street against its traffic (a road that only comes in).
+            val exit = path[j].next.indices.filter { path[j].next[it] !== path[j - 1] && !path[j].against[it] }
+                .map { path[j].next[it] }
                 .minByOrNull { abs(turn(inDeg, heading(it.x - path[j].x, it.y - path[j].y)) - turnTo) }
             if (exit != null && abs(turn(inDeg, heading(exit.x - path[j].x, exit.y - path[j].y)) - turnTo) <= EXIT_TOLERANCE_DEG) {
                 val out = ArrayList<Float>(pts.subList(0, 2 * (j + 1)))
@@ -254,18 +269,104 @@ object RoutePath {
 
     /** How far round a ring is followed before giving up (a big roundabout is ~250 m round). */
     const val RING_MAX_M = 400f
-    /** An exit is taken when its net turn is within this of the one AA's exit angle implies. */
-    const val RING_EXIT_TOLERANCE_DEG = 35f
+    /** A way off the ring counts as an exit when it bends this much further out than the ring itself. */
+    const val RING_EXIT_SPREAD_DEG = 8f
+    /** AA's exit (by number) is taken when its net turn is within this of AA's exit angle... */
+    const val RING_COUNT_TOLERANCE_DEG = 60f
+    /** ...else the exit closest to that angle, within this. */
+    const val RING_EXIT_TOLERANCE_DEG = 45f
+    /** An exit's direction is read this far along it. */
+    const val RING_EXIT_LOOK_M = 25f
+    /** On the ring: the exit nearest AA's distance, within this of it. */
+    const val RING_GUIDE_M = 60f
+
+    /** An exit off the ring: the ring drawn up to it ([upTo] floats), the node and the way out, the net turn, the way round. */
+    private class Exit(val upTo: Int, val node: Node, val k: Int, val net: Float, val ringM: Float)
+
+    /**
+     * Round the ring from [prev] -> [first] (the most inward way at every node), appending the
+     * ring to [out], listing its exits: per node, the ways that bend out further than the ring
+     * (one per node, the one closest to [wantNet] against [approach]), not driveways, not roads
+     * that only come in. [dir] +1 counter-clockwise, -1 clockwise.
+     */
+    private fun walkRing(prev0: Node, first: Node, dir: Float, approach: Float, wantNet: Float, out: ArrayList<Float>, stopAt: Node?): List<Exit> {
+        fun turnTo(a: Node, b: Node, from: Float) = turn(from, heading(b.x - a.x, b.y - a.y))
+        val exits = ArrayList<Exit>()
+        var prev = prev0
+        var cur = first
+        var ringM = 0f
+        while (ringM < RING_MAX_M) {
+            ringM += hypot(cur.x - prev.x, cur.y - prev.y)
+            out += cur.x; out += cur.y
+            if (cur === stopAt) break // all the way round
+            val inDeg = heading(cur.x - prev.x, cur.y - prev.y)
+            val options = cur.next.indices.filter { cur.next[it] !== prev }
+            if (options.isEmpty()) break
+            // On the ring: its own ways when the map marks them (an exit can bend in further than
+            // the ring where it leaves), else the most inward way (left round a counter-clockwise ring).
+            val ringWays = options.filter { cur.ring[it] && !cur.against[it] }
+            val onRing = (ringWays.ifEmpty { options }).minBy { turnTo(cur, cur.next[it], inDeg) * dir }
+            val ringTurn = turnTo(cur, cur.next[onRing], inDeg) * dir
+            options.filter { k ->
+                k != onRing && !cur.minor[k] && !cur.against[k] && !cur.ring[k] &&
+                    turnTo(cur, cur.next[k], inDeg) * dir - ringTurn >= RING_EXIT_SPREAD_DEG
+            }.minByOrNull { k -> abs(turn(wantNet, turn(approach, outHeading(cur, k)))) }?.let { k ->
+                exits += Exit(out.size, cur, k, turn(approach, outHeading(cur, k)), ringM)
+            }
+            prev = cur
+            cur = cur.next[onRing]
+        }
+        return exits
+    }
+
+    /**
+     * Where a way off the ring heads: [RING_EXIT_LOOK_M] along it, not its first step (an exit
+     * that leaves at a tangent and then turns read as a right turn when it was nearly a U-turn).
+     */
+    private fun outHeading(cur: Node, k: Int): Float {
+        var p = cur
+        var c = cur.next[k]
+        var d = hypot(c.x - p.x, c.y - p.y)
+        while (d < RING_EXIT_LOOK_M) {
+            val n = straightOn(p, c) ?: break
+            d += hypot(n.x - c.x, n.y - c.y)
+            p = c
+            c = n
+        }
+        return heading(c.x - cur.x, c.y - cur.y)
+    }
+
+    /** [route] (the ring up to [e]) on along exit [e]'s road, as in [routeFrom]'s tail. */
+    private fun exitRoute(out: List<Float>, e: Exit): Route {
+        val route = ArrayList<Float>(out.subList(0, e.upTo))
+        var p = e.node
+        var c: Node = e.node.next[e.k]
+        var tail = 0f
+        while (true) {
+            tail += hypot(c.x - p.x, c.y - p.y)
+            route += c.x; route += c.y
+            if (tail >= TAIL_M) break
+            if (tail >= TAIL_MIN_M && isJunction(p, c)) break
+            val n = straightOn(p, c) ?: break
+            p = c
+            c = n
+        }
+        return Route(route.toFloatArray(), matched = true, nextOnSide = false)
+    }
 
     /**
      * Approaching a roundabout (owner, 2026-10-26: the map only showed the arrow): the road to
      * the entry at AA's distance, round the ring in the direction of travel ([clockwise] false =
-     * counter-clockwise, right-hand traffic), out of the exit whose net turn against the
-     * approach matches AA's [exitAngleDeg] (degrees round the ring; 180 = straight across, so
-     * the net turn is 180 - angle, mirrored when clockwise), then along that road. Null when
+     * counter-clockwise, right-hand traffic), out of AA's exit, then along that road. Null when
      * the map has no ring there (the caller falls back to the plain route).
+     *
+     * Which exit (2026-10-26 drive, Charitas: AA said 6th exit at 315 degrees; the map has 3,
+     * two of them leaving the ring at a tangent, and the one taken is nearly back the way it
+     * came): AA's [exitNumber] when its net turn agrees with [exitAngleDeg] (degrees round the
+     * ring, 180 = straight across, so the net turn is 180 - angle, mirrored when clockwise); a
+     * number past the map's exits means the last one; else the exit closest to the angle.
      */
-    fun roundabout(roads: List<LocalRoad>, meters: Float?, exitAngleDeg: Float, clockwise: Boolean): Route? {
+    fun roundabout(roads: List<LocalRoad>, meters: Float?, exitAngleDeg: Float, clockwise: Boolean, exitNumber: Int? = null): Route? {
         if (meters == null || meters > AHEAD_M) return null
         val nodes = graph(roads)
         val (from, to, start) = matchStart(nodes) ?: return null
@@ -290,46 +391,40 @@ object RoutePath {
         // + = the way round: right then left round a counter-clockwise ring, mirrored clockwise.
         val dir = if (clockwise) -1f else 1f
         fun turnTo(a: Node, b: Node, from: Float) = turn(from, heading(b.x - a.x, b.y - a.y))
-        val ring0 = entry.next.filter { it !== path[e - 1] && turnTo(entry, it, approach) * dir in 10f..160f }
+        val ways = entry.next.indices.filter { entry.next[it] !== path[e - 1] && turnTo(entry, entry.next[it], approach) * dir in 10f..160f }
+        // Onto the ring's own way when the map marks it.
+        val ring0 = (ways.filter { entry.ring[it] }.ifEmpty { ways }).map { entry.next[it] }
             .minByOrNull { abs(turnTo(entry, it, approach) * dir - 70f) } ?: return null
         val wantNet = dir * (180f - exitAngleDeg)
         val out = ArrayList<Float>(pts.subList(0, 2 * (e + 1)))
-        var prev = entry
-        var cur = ring0
-        var ringM = 0f
-        while (ringM < RING_MAX_M) {
-            ringM += hypot(cur.x - prev.x, cur.y - prev.y)
-            out += cur.x; out += cur.y
-            if (cur === entry) return null // all the way round: no such exit
-            val inDeg = heading(cur.x - prev.x, cur.y - prev.y)
-            val options = cur.next.indices.filter { cur.next[it] !== prev }
-            if (options.isEmpty()) return null
-            // On the ring: the most inward way (left round a counter-clockwise ring).
-            val onRing = options.minBy { turnTo(cur, cur.next[it], inDeg) * dir }
-            val exit = options.firstOrNull { k ->
-                k != onRing && !cur.minor[k] && turnTo(cur, cur.next[k], inDeg) * dir > 15f &&
-                    abs(turn(wantNet, turnTo(cur, cur.next[k], approach))) <= RING_EXIT_TOLERANCE_DEG
-            }
-            if (exit != null) {
-                var p = cur
-                var c: Node = cur.next[exit]
-                var tail = 0f
-                while (true) {
-                    tail += hypot(c.x - p.x, c.y - p.y)
-                    out += c.x; out += c.y
-                    if (tail >= TAIL_M) break
-                    if (tail >= TAIL_MIN_M && isJunction(p, c)) break
-                    val n = straightOn(p, c) ?: break
-                    p = c
-                    c = n
-                }
-                return Route(out.toFloatArray(), matched = true, nextOnSide = false)
-            }
-            val next = cur.next[onRing]
-            prev = cur
-            cur = next
-        }
-        return null
+        val exits = walkRing(entry, ring0, dir, approach, wantNet, out, stopAt = entry)
+        fun off(x: Exit) = abs(turn(wantNet, x.net))
+        // A number past the map's exits: AA counts more (roads in, lanes), the exit is the last
+        // one the map has; AA's angle didn't fit it there (Charitas: 315 for nearly a U-turn).
+        val pastTheMap = exitNumber != null && exitNumber > exits.size && exits.size >= 2
+        val chosen = (if (pastTheMap) exits.last() else null)
+            ?: exitNumber?.let { exits.getOrNull(it - 1) }?.takeIf { off(it) <= RING_COUNT_TOLERANCE_DEG }
+            ?: exits.minByOrNull { off(it) }?.takeIf { off(it) <= RING_EXIT_TOLERANCE_DEG }
+            ?: return null
+        return exitRoute(out, chosen)
+    }
+
+    /**
+     * Already on the ring: round it to the exit nearest AA's distance ([meters], to the exit),
+     * within [RING_GUIDE_M]. Null when the car isn't on a mapped road or no exit is near.
+     */
+    fun onRing(roads: List<LocalRoad>, meters: Float?, clockwise: Boolean): Route? {
+        if (meters == null || meters > RING_MAX_M) return null
+        val nodes = graph(roads)
+        val (from, to, start) = matchStart(nodes) ?: return null
+        val dir = if (clockwise) -1f else 1f
+        val out = arrayListOf(start.first, start.second)
+        // Once round at most (back where the car is).
+        val exits = walkRing(from, to, dir, heading(to.x - from.x, to.y - from.y), 0f, out, stopAt = from)
+        val lead = hypot(to.x - start.first, to.y - start.second) - hypot(to.x - from.x, to.y - from.y)
+        val chosen = exits.minByOrNull { abs(it.ringM + lead - meters) }?.takeIf { abs(it.ringM + lead - meters) <= RING_GUIDE_M }
+            ?: return null
+        return exitRoute(out, chosen)
     }
 
     /** [cur] (reached from [prev]) is a real junction: two or more onward ways that aren't driveways. */

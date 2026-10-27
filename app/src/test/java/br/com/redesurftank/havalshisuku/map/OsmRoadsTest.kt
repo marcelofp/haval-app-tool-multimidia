@@ -186,6 +186,56 @@ class OsmRoadsTest {
     }
 
     @Test
+    fun `roundabout - AA's exit number, the last exit past the map's count, roads that only come in skipped`() {
+        // Exits counter-clockwise: right (1st), ahead (2nd), left (3rd).
+        val second = RoutePath.roundabout(ring(), 100f, 180f, clockwise = false, exitNumber = 2)!!
+        assertEquals(0f, second.pts[second.pts.size - 2], 1f)
+        // Charitas, 2026-10-26: AA's number past the map's exits (and its angle off): the last one.
+        val past = RoutePath.roundabout(ring(), 100f, 90f, clockwise = false, exitNumber = 9)!!
+        assertTrue(past.pts[past.pts.size - 2] < -100f)
+        // The right-hand road only comes into the ring: not an exit, so the 1st exit is ahead.
+        val roads = ring().toMutableList().also { it[2] = LocalRoad(floatArrayOf(140f, 115f, 15f, 115f), 1f, oneway = true) }
+        val first = RoutePath.roundabout(roads, 100f, 180f, clockwise = false, exitNumber = 1)!!
+        assertEquals(0f, first.pts[first.pts.size - 2], 1f)
+        assertTrue((0 until first.pts.size / 2).none { first.pts[2 * it] > 30f })
+    }
+
+    @Test
+    fun `on the ring - out of the exit at AA's distance round it`() {
+        // A counter-clockwise ring with the car on it heading ahead (centre 15 m to the left).
+        val pts = ArrayList<Float>()
+        for (k in 0..24) {
+            val th = Math.toRadians(15.0 * k)
+            pts += (-15 + 15 * kotlin.math.cos(th)).toFloat(); pts += (15 * kotlin.math.sin(th)).toFloat()
+        }
+        val roads = listOf(
+            LocalRoad(pts.toFloatArray(), 1f, ring = true),
+            LocalRoad(floatArrayOf(-15f, 15f, -15f, 140f), 1f),   // a quarter round (~24 m)
+            LocalRoad(floatArrayOf(-30f, 0f, -150f, 0f), 1f)      // half round (~47 m)
+        )
+        val top = RoutePath.onRing(roads, 24f, clockwise = false)!!
+        assertEquals(-15f, top.pts[top.pts.size - 2], 1f)
+        assertTrue(top.pts[top.pts.size - 1] > 100f)
+        val left = RoutePath.onRing(roads, 47f, clockwise = false)!!
+        assertTrue(left.pts[left.pts.size - 2] < -100f)
+        // Nothing near AA's distance: null (the plain route is used).
+        assertNull(RoutePath.onRing(roads, 200f, clockwise = false))
+    }
+
+    @Test
+    fun `route - never out into a one-way street against its traffic`() {
+        val roads = listOf(
+            LocalRoad(floatArrayOf(0f, -30f, 0f, 100f, 0f, 300f), 1f),
+            LocalRoad(floatArrayOf(120f, 100f, 0f, 100f), 1f, oneway = true) // comes in from the right
+        )
+        val r = RoutePath.route(roads, 100f, 90f)!!
+        assertTrue((0 until r.pts.size / 2).none { kotlin.math.abs(r.pts[2 * it + 1] - 100f) < 1f && r.pts[2 * it] > 60f })
+        // The same street two-way: taken.
+        val two = RoutePath.route(listOf(roads[0], LocalRoad(floatArrayOf(120f, 100f, 0f, 100f), 1f)), 100f, 90f)!!
+        assertEquals(120f, two.pts[two.pts.size - 2], 1f)
+    }
+
+    @Test
     fun `route - after the turn, the tail stops at the next junction (the way on is unknown)`() {
         fun road(vararg xy: Float, w: Float = 1f) = LocalRoad(xy, w)
         // Right at 100 m onto a street with a cross street 11 m in (Lorde Byron, 2026-10-25).

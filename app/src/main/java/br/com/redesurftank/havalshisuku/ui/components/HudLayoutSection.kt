@@ -6,6 +6,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
+import kotlin.math.roundToInt
 import androidx.compose.material.icons.filled.Add
 import br.com.redesurftank.havalshisuku.hud.PreviewFocus
 import br.com.redesurftank.havalshisuku.hud.previewFocusIndex
@@ -258,7 +259,9 @@ private enum class HudColorItem(
     val get: (HudOverlayModel.Colors) -> Int,
     val set: (HudOverlayModel.Colors, Int) -> HudOverlayModel.Colors,
     val default: Int,
-    val focus: PreviewFocus?
+    val focus: PreviewFocus?,
+    /** Opacity it starts at: the streets were always see-through (owner, 2026-10-26). */
+    val defaultOpacity: Float = 1f
 ) {
     TEXT("Texto", { _, _ -> true }, { it.text }, { c, v -> c.copy(text = v) }, HudOverlayModel.COLOR_TEXT, null),
     DRIVE("EV", { c, l -> c.powerBar && c.copy(layout = l).gauges != HudOverlayModel.Gauges.NONE },
@@ -268,7 +271,8 @@ private enum class HudColorItem(
     RPM("RPM", { c, l -> c.rpmBar && c.copy(layout = l).gauges != HudOverlayModel.Gauges.NONE },
         { it.rpm }, { c, v -> c.copy(rpm = v) }, HudOverlayModel.COLOR_RPM, PreviewFocus.GAUGES),
     STREET("Rua", { c, l -> l == HudOverlayModel.Layout.AR && c.navigation && c.mapStreets },
-        { it.street }, { c, v -> c.copy(street = v) }, HudOverlayModel.COLOR_STREET, PreviewFocus.ARROW),
+        { it.street }, { c, v -> c.copy(street = v) }, HudOverlayModel.COLOR_STREET, PreviewFocus.ARROW,
+        HudOverlayModel.STREET_DEFAULT_OPACITY),
     ROUTE("Seta", { c, l -> l == HudOverlayModel.Layout.AR && c.navigation },
         { it.route }, { c, v -> c.copy(route = v) }, HudOverlayModel.COLOR_ROUTE, PreviewFocus.ARROW),
     CHEVRON("Seta de direção", { c, _ -> c.navigation && c.chevrons },
@@ -437,12 +441,21 @@ internal fun HudNavigationSettingsDialog(
                                 // Only the parts that are on (owner): a part switched off elsewhere isn't offered.
                                 val items = HudColorItem.entries.filter { it.shown(config, layout) }
                                 val item = colorItem.takeIf { it in items } ?: items.first()
-                                ColorItemsRow(config.colors, items, item, enabled = colorful) { colorItem = it }
+                                // The parts and their opacity stay open in Azul too (it only sets the colour).
+                                ColorItemsRow(config.colors, items, item, enabled = true) { colorItem = it }
+                                val current = item.get(config.colors)
                                 SwatchRow(
-                                    selected = item.get(config.colors),
+                                    selected = current,
                                     default = item.default,
                                     enabled = colorful
-                                ) { v -> change(config.copy(colors = item.set(config.colors, v)), item.focus) }
+                                ) { v ->
+                                    // A new colour keeps the part's opacity.
+                                    val kept = (current and HudOverlayModel.ALPHA_MASK) or (v and HudOverlayModel.RGB_MASK)
+                                    change(config.copy(colors = item.set(config.colors, kept)), item.focus)
+                                }
+                                OpacityRow(HudOverlayModel.opacityOf(current), item.defaultOpacity) { o ->
+                                    change(config.copy(colors = item.set(config.colors, HudOverlayModel.withOpacity(current, o))), item.focus)
+                                }
                             }
                             HudSettingsTab.STYLE -> {
                                 ChoiceRow(
@@ -766,7 +779,7 @@ private fun SwatchRow(selected: Int, default: Int, enabled: Boolean, onPick: (In
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
     ) {
         for ((name, value) in HudOverlayModel.COLOR_SWATCHES) {
-            val on = value == selected
+            val on = HudOverlayModel.sameRgb(value, selected)
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
@@ -780,12 +793,12 @@ private fun SwatchRow(selected: Int, default: Int, enabled: Boolean, onPick: (In
                     .semantics { contentDescription = name }
             ) {
                 // The colour the HUD always had for this part.
-                if (value == default) {
+                if (HudOverlayModel.sameRgb(value, default)) {
                     Box(Modifier.size(6.dp).clip(RoundedCornerShape(3.dp)).background(Color.Black.copy(alpha = 0.55f)))
                 }
             }
         }
-        val custom = HudOverlayModel.COLOR_SWATCHES.none { it.second == selected }
+        val custom = HudOverlayModel.COLOR_SWATCHES.none { HudOverlayModel.sameRgb(it.second, selected) }
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
@@ -795,7 +808,7 @@ private fun SwatchRow(selected: Int, default: Int, enabled: Boolean, onPick: (In
                 .padding(4.dp)
                 .clip(RoundedCornerShape(13.dp))
                 .background(
-                    if (custom) androidx.compose.ui.graphics.SolidColor(Color(selected))
+                    if (custom) androidx.compose.ui.graphics.SolidColor(Color(selected or HudOverlayModel.ALPHA_MASK))
                     else androidx.compose.ui.graphics.Brush.sweepGradient(HUE_STOPS),
                     alpha = if (enabled) 1f else 0.35f
                 )
@@ -803,6 +816,46 @@ private fun SwatchRow(selected: Int, default: Int, enabled: Boolean, onPick: (In
                 .semantics { contentDescription = "Cor personalizada" }
         ) {
             if (!custom) Icon(Icons.Default.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+/**
+ * The part's opacity, 10..100 % (owner, 2026-10-26). Saved when the finger lifts, so the preview
+ * isn't redrawn on every step of the drag. [default] is marked by the reset chip.
+ */
+@Composable
+private fun OpacityRow(opacity: Float, default: Float, onChange: (Float) -> Unit) {
+    var value by remember(opacity) { mutableFloatStateOf(opacity) }
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        Text("Opacidade", color = Color.White, fontSize = 14.sp, modifier = Modifier.width(90.dp))
+        androidx.compose.material3.Slider(
+            value = value,
+            onValueChange = { value = it },
+            onValueChangeFinished = { onChange(value) },
+            valueRange = HudOverlayModel.MIN_OPACITY..1f,
+            colors = androidx.compose.material3.SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = ImpTokens.Accent,
+                inactiveTrackColor = ImpTokens.TrackOff
+            ),
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            "${(value * 100).roundToInt()} %",
+            color = ImpTokens.TextSecondary,
+            fontSize = 14.sp,
+            modifier = Modifier.width(52.dp).padding(start = 8.dp)
+        )
+        val atDefault = kotlin.math.abs(value - default) < 0.01f
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(14.dp))
+                .border(1.dp, if (atDefault) ImpTokens.TrackOff else ImpTokens.Accent, RoundedCornerShape(14.dp))
+                .clickable(enabled = !atDefault) { value = default; onChange(default) }
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+            Text("Padrão", color = if (atDefault) ImpTokens.TextMuted else Color.White, fontSize = 13.sp)
         }
     }
 }

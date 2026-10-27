@@ -436,6 +436,7 @@ enum class SharedPreferencesKeys(val key: String, val description: String) {
     HUD_COLOR_STREET("hudColorStreet", "HUD: cor das ruas do mapa"),
     HUD_COLOR_ROUTE("hudColorRoute", "HUD: cor da rota/seta do mapa"),
     HUD_COLOR_TEXT("hudColorText", "HUD: cor padrão do texto e ícones"),
+    HUD_COLOR_OPACITY("hudColorOpacity", "HUD: cores já salvas com opacidade (antes disso a rua era salva sólida)"),
     HUD_COLOR_CHEVRON("hudColorChevron", "HUD: cor da seta de direção (setas perto das curvas)"),
     // Alerta de radar (Recursos). Read through RadarSettings.
     // The theme's turn-by-turn card (owner, 2026-10-25). Off: the theme gets "no navigation";

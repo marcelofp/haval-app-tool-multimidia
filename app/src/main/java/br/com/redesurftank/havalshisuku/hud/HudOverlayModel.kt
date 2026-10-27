@@ -925,6 +925,8 @@ object HudOverlayModel {
 
     /** On the ring, leaving it: about this turn off the ring (+ right, counter-clockwise rings). */
     const val RING_EXIT_TURN_DEG = 70f
+    /** Under this bend a maneuver is drawn as the road straight on (RoutePath draws no turn under 20). */
+    const val STRAIGHT_ROUTE_DEG = 20f
 
     /** Exit angle the dynamic icon can draw: 1..360, else null (static icon). */
     fun drawableExitAngle(angle: Int?): Int? = angle?.takeIf { it in 1..360 }
@@ -1032,28 +1034,40 @@ object HudOverlayModel {
         /** RPM arc. */
         val rpm: Int = COLOR_RPM,
         /** Map: the streets round the route, and the route / 3D arrow (the destination flag too). */
-        val street: Int = COLOR_STREET,
+        val street: Int = withOpacity(COLOR_STREET, STREET_DEFAULT_OPACITY),
         val route: Int = COLOR_ROUTE,
         /** Text, maneuver icons and lanes. */
         val text: Int = COLOR_TEXT,
         /** The turn warning (approach chevrons). */
         val chevron: Int = COLOR_CHEVRON
     ) {
-        /** What the HUD draws with: the picks, or [BLUE_COLORS] in [ColorMode.BLUE]. */
-        fun resolved(): Colors = if (mode == ColorMode.BLUE) BLUE_COLORS else this
+        /**
+         * What the HUD draws with: the picks, or in [ColorMode.BLUE] everything in the first
+         * blue swatch, "Azul claro" (owner, 2026-10-26: shades read as white), each part keeping
+         * its own opacity.
+         */
+        fun resolved(): Colors {
+            if (mode == ColorMode.COLORFUL) return this
+            fun blue(c: Int) = (c and ALPHA_MASK) or (COLOR_DRIVE and RGB_MASK)
+            return Colors(mode, blue(drive), blue(regen), blue(rpm), blue(street), blue(route), blue(text), blue(chevron))
+        }
     }
 
-    /** "Azul": everything in the first blue swatch, "Azul claro" (owner, 2026-10-26: shades read as white). */
-    val BLUE_COLORS = Colors(
-        mode = ColorMode.BLUE,
-        drive = COLOR_DRIVE,
-        regen = COLOR_DRIVE,
-        rpm = COLOR_DRIVE,
-        street = COLOR_DRIVE,
-        route = COLOR_DRIVE,
-        text = COLOR_DRIVE,
-        chevron = COLOR_DRIVE
-    )
+    /** "Azul" with the default opacities. */
+    val BLUE_COLORS: Colors get() = Colors(mode = ColorMode.BLUE).resolved()
+
+    // Opacity (owner, 2026-10-26): each colour carries it in its alpha byte, 10..100 %. The
+    // streets default to [STREET_DEFAULT_OPACITY], which is how they always looked; more makes
+    // them more solid. Fades (top, sides, bottom) are multiplied, never replaced.
+    const val ALPHA_MASK = -0x1000000
+    const val RGB_MASK = 0xFFFFFF
+    const val MIN_OPACITY = 0.1f
+    const val STREET_DEFAULT_OPACITY = 0.6f
+
+    fun opacityOf(c: Int): Float = ((c ushr 24) and 0xFF) / 255f
+    fun withOpacity(c: Int, opacity: Float): Int =
+        ((opacity.coerceIn(MIN_OPACITY, 1f) * 255).roundToInt() shl 24) or (c and RGB_MASK)
+    fun sameRgb(a: Int, b: Int): Boolean = (a and RGB_MASK) == (b and RGB_MASK)
 
     /** The picker's swatches: name and colour. */
     val COLOR_SWATCHES: List<Pair<String, Int>> = listOf(
@@ -1078,7 +1092,7 @@ object HudOverlayModel {
     }
 
     /** The route's near (bottom) end: the original light blue for the default, else [route] lightened. */
-    fun routeNear(route: Int): Int = if (route == COLOR_ROUTE) rgb(120, 200, 255) else mixColor(route, COLOR_TEXT, 0.4f)
+    fun routeNear(route: Int): Int = if (sameRgb(route, COLOR_ROUTE)) rgb(120, 200, 255) else mixColor(route, COLOR_TEXT, 0.4f)
 
     /** Maneuver icon sets (owner, 2026-10-25: choose between them). */
     enum class IconStyle(val key: String) {
@@ -1289,13 +1303,19 @@ object HudOverlayModel {
         // Roundabouts (owner, 2026-10-26): round the ring and out of our exit, not just an arrow.
         // On the ring AA's distance is to the exit: follow the ring there and turn out.
         val ring = if (!tbt.dynamicRoundabout) null else if (tbt.rbProgress > 0.02f || tbt.onRoundabout) {
-            rp.route(streets, tbt.guideMeters ?: tbt.arMeters, if (tbt.roundaboutClockwise) -RING_EXIT_TURN_DEG else RING_EXIT_TURN_DEG)
+            rp.onRing(streets, tbt.guideMeters ?: tbt.arMeters, tbt.roundaboutClockwise)
+                ?: rp.route(streets, tbt.guideMeters ?: tbt.arMeters, if (tbt.roundaboutClockwise) -RING_EXIT_TURN_DEG else RING_EXIT_TURN_DEG)
         } else {
-            rp.roundabout(streets, tbt.arMeters, tbt.exitAngle!!.toFloat(), tbt.roundaboutClockwise)
+            rp.roundabout(streets, tbt.arMeters, tbt.exitAngle!!.toFloat(), tbt.roundaboutClockwise, tbt.exitNumber)
         }
+        // Straight on (a name change, a merge, a junction passed straight): the road ahead, not
+        // a stub that ends at the junction (owner, 2026-10-26: round the São Francisco tunnel
+        // the map turned into a short arrow). A destination still ends where it is.
+        val straight = tbt.arDestination == null && !tbt.dynamicRoundabout && kotlin.math.abs(turn ?: 0f) < STRAIGHT_ROUTE_DEG
+        val meters = if (straight) null else tbt.arMeters
         val route = ring
-            ?: rp.route(streets, tbt.arMeters, turn)
-            ?: rp.synthetic(tbt.arMeters, turn)
+            ?: rp.route(streets, meters, turn)
+            ?: rp.synthetic(meters, turn)
         return tbt.copy(streets = streets, route = route.pts, routeMatched = route.matched, routeClear = route.nextOnSide)
     }
 
