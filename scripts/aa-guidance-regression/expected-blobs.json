@@ -1,0 +1,7 @@
+{
+  "services/AndroidAutoNavigationMonitor.kt": "0d024c20666cfa2c281571bc528d2cb27d764929",
+  "managers/AndroidAutoNavigationTelemetry.kt": "aaa42db7701f37ce01b1476f4f1ed1092a752703",
+  "navigation/CarPlayHudPolicy.kt": "c36e7a701301eadd128d11aaac2f374719885d8a",
+  "managers/AndroidAutoSessionTelemetry.kt": "deab2cb8e125bbf5304425b70ce4a8fbdfff65bf",
+  "navigation/CarPlayGuidance.kt": "c7e606d206d66b8af2ccc1a43f28087243629607"
+}
