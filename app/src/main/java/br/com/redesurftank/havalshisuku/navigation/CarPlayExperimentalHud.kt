@@ -19,6 +19,8 @@ object CarPlayExperimentalHud {
     private val policy = CarPlayHudPolicy()
     private val started = AtomicBoolean(false)
     private var published = AndroidAutoNavigationTelemetry.inactive()
+    // Track ownership separately: AA and CarPlay can produce identical text fields.
+    private var publishedCarPlay = false
     @Volatile var enabled = false
         private set
     @Volatile var decisionMessage = "HUD experimental desativado"
@@ -156,9 +158,11 @@ object CarPlayExperimentalHud {
             "CP_DATA_NOT_FRESH" -> "Aguardando dados recentes do CarPlay"
             else -> "Texto do CarPlay enviado ao HUD"
         }
+        val retainInactive = !publishedCarPlay
+        publishedCarPlay = next.active && diagnostics["reason"] == "CARPLAY_TEXT"
         if (forwardUnchanged || next != published) {
             published = next
-            HudOverlayController.onDirections(next)
+            HudOverlayController.onDirections(next, retainInactive)
         }
         if (captureId != null) {
             val signature = diagnostics.filterKeys { !it.endsWith("_age") }.toSortedMap().entries
@@ -173,3 +177,4 @@ object CarPlayExperimentalHud {
 
     private const val TAG = "CarPlayExperimentalHud"
 }
+

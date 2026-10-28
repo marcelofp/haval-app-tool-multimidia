@@ -10,6 +10,7 @@ import android.util.Log
 import br.com.redesurftank.App
 import br.com.redesurftank.havalshisuku.BuildConfig
 import br.com.redesurftank.havalshisuku.diagnostics.ClusterPersistentEventLogger
+import br.com.redesurftank.havalshisuku.experimental.CarPlayColdAttachProof
 import br.com.redesurftank.havalshisuku.experimental.CarPlayBootstrapRoot
 import br.com.redesurftank.havalshisuku.experimental.CarPlayBridgeAttemptScope
 import br.com.redesurftank.havalshisuku.experimental.CarPlayProjectionVisibilityProbe
@@ -50,7 +51,7 @@ object CarPlayBridgeBootstrapManager {
         val action: Policy.Action, val coldClearObservedAtMs: Long = 0) {
         fun publicationKey() = CarPlaySafetyPublicationGate.Key(identity.boot, identity.pid, identity.start, ticket)
         fun hasFreshColdClearProof(nowMs: Long) = action == Policy.Action.COLD_ATTACH &&
-            coldClearObservedAtMs > 0 && nowMs - coldClearObservedAtMs in 0..2_500
+            CarPlayColdAttachProof.fresh(coldClearObservedAtMs, nowMs)
     }
     @Volatile private var activeAttempt: ActiveAttempt? = null
     @Volatile private var safety = Safety()
@@ -177,10 +178,18 @@ object CarPlayBridgeBootstrapManager {
             .put("coldAttach", coldAttach)
             .put("preparationState", mutableStatus.value.state)
         synchronized(safetyWriteLock) {
+            // A same-ticket observation may have revoked/replaced the cold lease
+            // while this publisher was reading. Never publish that stale snapshot.
+            if (attempt !== activeAttempt) return@synchronized
             val enabled = isAutomaticEnabled()
             val phase = prefs().getString("cpBridgeAttemptPhase", "").orEmpty()
+            val freshColdAttach = attempt?.hasFreshColdClearProof(SystemClock.elapsedRealtime()) == true
+            val eligibleNow = eligible && (quiet == true || freshColdAttach) &&
+                System.currentTimeMillis() - beginWall in 0..2500 &&
+                SystemClock.elapsedRealtime() - beginElapsed in 0..2500
+            packet.put("coldAttach", freshColdAttach)
             val decision = publicationGate.decide(attempt?.publicationKey(), activeAttempt?.publicationKey(),
-                eligible, enabled, inFlight.get(), phase)
+                eligibleNow, enabled, inFlight.get(), phase)
             if (decision == CarPlaySafetyPublicationGate.Decision.DROP) return@synchronized
             packet.put("eligible", decision == CarPlaySafetyPublicationGate.Decision.ALLOW)
                 .put("enabled", enabled).put("inFlight", inFlight.get()).put("attemptPhase", phase)
@@ -784,10 +793,35 @@ object CarPlayBridgeBootstrapManager {
         val action = if (prefs().getBoolean("cpBridgeAttemptWarmRestart", false)) {
             Policy.Action.COLD_RESTART
         } else Policy.Action.COLD_ATTACH
-        synchronized(safetyWriteLock) { activeAttempt = ActiveAttempt(identity, attemptTicket, action) }
+        synchronized(safetyWriteLock) {
+            val recovered = ActiveAttempt(identity, attemptTicket, action)
+            val previous = activeAttempt
+            activeAttempt = recovered.copy(coldClearObservedAtMs =
+                CarPlayColdAttachProof.recover(previous?.publicationKey(), recovered.publicationKey(),
+                    previous?.coldClearObservedAtMs ?: 0))
+        }
         val deadline = prefs().getLong("cpBridgeAttemptDeadlineElapsed", 0)
         check(deadline - SystemClock.elapsedRealtime() in 1L..330_000L)
         while (SystemClock.elapsedRealtime() < deadline) {
+            // Only a new exact cold/clear observation can renew this short lease.
+            // Resident challenges may block, so observe before starting them.
+            if (action == Policy.Action.COLD_ATTACH) {
+                val sampledAttempt = activeAttempt
+                val observedAt = SystemClock.elapsedRealtime()
+                val coldState = runCatching { observe(bundle, minimal = true, includeVisuals = true) }.getOrNull()
+                val finishedAt = SystemClock.elapsedRealtime()
+                synchronized(safetyWriteLock) {
+                    if (activeAttempt === sampledAttempt && sampledAttempt != null) {
+                        activeAttempt = sampledAttempt.copy(coldClearObservedAtMs =
+                            CarPlayColdAttachProof.observe(sampledAttempt.coldClearObservedAtMs,
+                                observedAt, finishedAt, coldState?.id == identity,
+                                coldState?.cold, coldState != null &&
+                                    (coldState.mappedPath == null || coldState.mappedPath == bundle.bridge),
+                                coldState?.visualEvidenceKnown == true,
+                                coldState?.cpVisual != false, coldState?.aaVisual != false))
+                    }
+                }
+            }
             val state = observe(bundle, includeVisuals = false)
             check(SystemClock.elapsedRealtime() < deadline) { "Resident preparation deadline expired" }
             check(state.id == identity) { "OEM identity changed during resident preparation" }
@@ -1157,3 +1191,4 @@ object CarPlayBridgeBootstrapManager {
     private fun q(value: String) = CarPlayBootstrapRoot.quote(value)
     private fun script(value: String) = value.trimIndent().replace('§', '$')
 }
+

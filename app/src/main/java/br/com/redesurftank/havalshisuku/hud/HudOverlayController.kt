@@ -140,9 +140,21 @@ object HudOverlayController {
     }
 
     /** Android Auto guidance, from AndroidAutoClusterController. Any thread. */
-    fun onDirections(update: AndroidAutoNavigationTelemetry.Directions) {
+    fun onDirections(update: AndroidAutoNavigationTelemetry.Directions) =
+        onDirections(update, retainInactive = true)
+
+    /** CarPlay lease withdrawal must clear immediately; ordinary AA rerouting keeps its debounce. */
+    fun onDirections(update: AndroidAutoNavigationTelemetry.Directions, retainInactive: Boolean) {
         main.post {
             if (!update.active) {
+                if (!retainInactive) {
+                    tbtHidePending = false
+                    main.removeCallbacks(hideTbtRunnable)
+                    navDirections = null
+                    navDistanceStale = false
+                    publish()
+                    return@post
+                }
                 // Arm once; repeated inactive updates must not keep pushing the hide out.
                 if (navDirections != null && !tbtHidePending) {
                     tbtHidePending = true
@@ -836,3 +848,4 @@ object HudOverlayController {
         if (wanted()) requestLaunch()
     }
 }
+

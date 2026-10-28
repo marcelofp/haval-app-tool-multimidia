@@ -89,10 +89,14 @@ wake using `elapsedRealtime`; it does not wake the central, hold a wake lock or 
 OEM session. This is a conservative display
 safety policy, not an inferred OEM route-end or transport-disconnect timeout. State 0,
 2, 3, 4, 5, 6, unknown/null, or invalid text/unit withdraw CarPlay input immediately.
-The existing native HUD debounces inactive cards for another five seconds; therefore
-a visible card can linger up to about ten seconds after silence. No new arrow is drawn.
-Explicit stop/off also follows that existing five-second HUD hide delay. AA active
-input is never cleared by a CarPlay stop, arrival, silence or switch-off.
+With this local correction, withdrawal of a previously published CarPlay card clears
+that card on the next main-thread HUD update, without the AA rerouting debounce.
+This applies to data/AA-observation expiry, wake revalidation, invalid guidance,
+binding loss and explicit stop/off. Any pending hide callback is cancelled before
+clearing. Ordinary Android Auto inactive updates retain their existing five-second
+debounce; active AA always replaces CarPlay immediately. Source ownership is tracked
+separately from field equality, so a CarPlay stop cannot clear an AA-owned card.
+No new arrow is drawn. Physical validation of the correction remains pending.
 
 The callback Binder, bounded gate/queue, Parcel reader, file bounds, permission checks,
 subscription 7/8 and existing diagnostic stop/rebind lifecycle remain unchanged.
@@ -119,3 +123,4 @@ clear AA. End capture and verify the experiment defaults off in the next session
 Collect logs privately. A five-minute drive validates neither long-sleep resumption nor
 reconnection after a sleep cycle; record those as separate version-identified tests.
 Do not call this functional turn arrows or clean-map support.
+
